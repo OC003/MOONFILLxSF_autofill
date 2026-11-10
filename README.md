@@ -111,3 +111,9 @@ When you report a problem, please send a screenshot of the Moonfill card, the pr
 ## Support
 
 Built by Rodier for Awin agents. Questions, bugs and ideas: [GitHub Issues](https://github.com/OptimusRodier/moonfill) or contact the project owner.
+
+## v2.1
+
+- **Fills Salesforce fields from the result**, silently, right after the result is pasted: Moonpull Status, Consent Signals, Transparency & Consent Framework Plugin, AASAF and Consent Management Platform are set (existing values replaced) and saved. No setting; the notification only mentions fields that need a look.
+- **Record page buttons:** Submit Moonpull form (left), IR (middle), New Implementation (right). One **IR button** on the Case page. Colours and spacing are in the `injectStyles` block of `salesforce.js`.
+- **Temporary window** is tried after any retryable failure. The steps of each post attempt are logged in the service worker console ("Moonfill post steps").

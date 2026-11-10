@@ -10,12 +10,13 @@
 const RESULT_FOLDER_URL =
   "https://zanox.sharepoint.com/teams/Global-MoonpullI-Integration/Shared%20Documents/General/batch%20results%20use%20cases/Integartion%20Tests/Moonpull%20Integration%20dataCenter/";
 
-const POLL_MS = 2000;                      // check every 2 seconds
-const POLL_START_MS = 4 * 60 * 1000;       // the flow needs ~4:30-5:00, so don't look before 4:00
+const POLL_MS = 10 * 1000;                 // check every 10 s, starting the moment the form is submitted
+                                           // (the result file lives ~30 s, so never poll slower than ~15 s)
 const JOB_TIMEOUT_MS = 6.5 * 60 * 1000;    // result appears ~5:00 and is deleted ~30 s later, stop at 6:30
 const PARKED_TIMEOUT_MS = 8 * 60 * 60 * 1000; // a waiting result is kept for 8 hours
 const PARK_RETRY_MS = 15000;               // retry a waiting result every 15 s while a browser window is focused
 const AUTO_SHARE = true;                   // false = paste into Chatter but don't click Share (tab stays open for review)
+const AUTO_WINDOW = true;                   // browser hidden/behind other apps: open a temporary window, paste, close it
 const ACTIVE = ["submitting", "waiting", "posting", "waiting_browser"];
 const HISTORY_MAX = 50;                    // finished jobs kept for the History view
 const FAILED_BADGE_MS = 10 * 60 * 1000;    // "!" on the icon for 10 minutes after a failure
@@ -28,16 +29,120 @@ const label = (job) => job.program || `MID ${job.mid}`;
 chrome.runtime.onInstalled.addListener(() => console.log("Moonfill extension installed"));
 chrome.runtime.onStartup.addListener(() => ensurePolling());
 
-function notify(title, message) {
-  chrome.notifications.create(
-    { type: "basic", iconUrl: "assets/icon128.png", title, message },
-    () => void chrome.runtime.lastError
-  );
+// kind: "done" | "failed" | "parked" | "folder". The id carries the job, so a click
+// still works after the service worker has been restarted.
+// buttons: up to 2 labels; what they do is decided in onButtonClicked below.
+function notify(title, message, { jobId, kind, buttons, sticky } = {}) {
+  const id = kind ? `moonfill|${kind}|${jobId || ""}|${Date.now()}` : "";
+  const options = { type: "basic", iconUrl: "assets/icon128.png", title, message };
+  if (buttons && buttons.length) options.buttons = buttons.map((t) => ({ title: t }));
+  if (sticky) options.requireInteraction = true; // stays until clicked or closed
+  chrome.notifications.create(id, options, () => void chrome.runtime.lastError);
 }
+
+async function getJob(id) {
+  const k = jobKey(id);
+  return (await chrome.storage.local.get(k))[k];
+}
+
+// Open the toolbar popup; if the browser refuses (not focused, older version), open it as a small window
+async function openMoonfill() {
+  try { await chrome.action.openPopup(); return; } catch (e) { /* fall through */ }
+  const url = chrome.runtime.getURL("popup.html");
+  const [existing] = await chrome.tabs.query({ url });
+  if (existing) {
+    await chrome.tabs.update(existing.id, { active: true });
+    await chrome.windows.update(existing.windowId, { focused: true });
+    return;
+  }
+  await chrome.windows.create({ url, type: "popup", width: 380, height: 560 });
+}
+
+// Go to the record where the result was pasted (reuse the tab if it is already open)
+async function openRecord(job) {
+  const origin = new URL(job.recordUrl).origin;
+  const [existing] = await chrome.tabs.query({ url: `${origin}/lightning/r/TSE__c/${job.recordId}/*` });
+  const tab = existing
+    ? await chrome.tabs.update(existing.id, { active: true })
+    : await chrome.tabs.create({ url: job.recordUrl, active: true });
+  try { await chrome.windows.update(tab.windowId, { focused: true }); } catch (e) { /* ignore */ }
+}
+
+chrome.notifications.onClicked.addListener(async (nid) => {
+  const [tag, kind, jobId] = nid.split("|");
+  if (tag !== "moonfill") return;
+  chrome.notifications.clear(nid);
+  const job = jobId ? await getJob(jobId) : null;
+  if (kind === "done" && job) return openRecord(job);
+  if (kind === "folder") return void chrome.tabs.create({ url: SP_SITE });
+  return openMoonfill(); // failed / parked: the card with Force paste is there
+});
+
+chrome.notifications.onButtonClicked.addListener(async (nid, idx) => {
+  const [tag, kind, jobId] = nid.split("|");
+  if (tag !== "moonfill") return;
+  chrome.notifications.clear(nid);
+  const job = jobId ? await getJob(jobId) : null;
+  if (kind === "done" && job) return openRecord(job);
+  if ((kind === "failed" || kind === "parked") && job && job.resultText && idx === 0) return forcePost(jobId);
+  return openMoonfill();
+});
 
 // ---------- result text: drop the requester's name and job title ----------
 // The flow writes "Your ... scan is complete for:" followed by the requester's
 // name and title. Neither is needed in the Chatter post.
+// ---------- Moonpull result -> Salesforce field values ----------
+// Parsed from the raw result and stored on the job, so Force paste can still fill them
+// after the result file has been deleted.
+const CMP_OPTIONS = ["Cookiebot", "Iubenda", "OneTrust", "Osano", "Sourcepoint", "Google Consent Mode"];
+const flat = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function resultLine(text, key) {
+  const m = new RegExp("^[ \\t]*" + key + "[ \\t]*:[ \\t]*(.*)$", "im").exec(text);
+  return m ? m[1].trim() : null; // null = the line is not in the result
+}
+
+function parseMoonpullFields(raw) {
+  const out = [];
+  const add = (label, value) => out.push({ label, value });
+
+  // Moonpull Status <- Enhanced Memory Cookie Status
+  const mem = resultLine(raw, "Enhanced Memory Cookie Status");
+  if (mem !== null) {
+    const k = mem.toLowerCase();
+    let v = "Review in platform"; // anything else
+    if (k.includes("on user consent")) v = "Memory on user consent";
+    else if (k.includes("not found")) v = "Critical";
+    else if (k.includes("appears immediately")) v = "Healthy";
+    else if (k.includes("closed advertiser")) v = "Warning";
+    add("Moonpull Status", v);
+  }
+
+  const yesNo = (s) => (/^true$/i.test(s || "") ? "Yes" : /^false$/i.test(s || "") ? "No" : null);
+  const consent = yesNo(resultLine(raw, "EnhancedCustomVariable_AfterConsent"));
+  if (consent) add("Consent Signals", consent);
+  const tcf = yesNo(resultLine(raw, "EnhancedCustomVariable_AfterConsentAndRefresh"));
+  if (tcf) add("Transparency & Consent Framework Plugin", tcf);
+
+  // AASAF: Yes only when every association line that is in the result says 1
+  const flags = ["Apple Site App Association", "Android Site App Association"]
+    .map((k) => resultLine(raw, k))
+    .filter((v) => v !== null)
+    .map((v) => v === "1");
+  if (flags.length) add("AASAF", flags.every(Boolean) ? "Yes" : "No");
+
+  // Consent Management Platform: a listed CMP, otherwise Other
+  const cmp = resultLine(raw, "Enhanced CMP Details");
+  if (cmp !== null) {
+    const hit = CMP_OPTIONS.find((o) => flat(cmp).includes(flat(o)));
+    add("Consent Management Platform", hit || "Other");
+  }
+  return out;
+}
+
+// After the result is pasted the Salesforce fields are always filled and saved (no setting)
+const FILL_FIELDS = true;
+
 function cleanResult(text) {
   return text
     .replace(/\r\n/g, "\n")
@@ -82,14 +187,20 @@ async function finishJob(job, state, error, note) {
   job.finishedAt = Date.now();
   job.error = error || null;
   job.note = note || null;
-  if (state === "done") delete job.resultText;
+  if (state === "done") { delete job.resultText; delete job.fields; }
   await saveJob(job);
   chrome.alarms.create("moonfillPrune", { delayInMinutes: 11 }); // clears the "!" badge later
   if (state === "failed") {
     notify(
       "Moonfill: scan failed",
       `${label(job)}: ${error}. ` +
-        (job.resultText ? "Open Moonfill to Force paste or Copy the result." : "Check Teams/email for the result.")
+        (job.resultText ? "Click to open Moonfill (Force paste / Copy result)." : "Click to open Moonfill. Check Teams/email for the result."),
+      {
+        jobId: job.id,
+        kind: "failed",
+        sticky: true,
+        buttons: job.resultText ? ["Force paste", "Open Moonfill"] : ["Open Moonfill"]
+      }
     );
   }
   await pruneFinished();
@@ -278,9 +389,6 @@ async function processJob(job) {
     return;
   }
 
-  // too early: the flow has not had time to write the file yet
-  if (Date.now() - (job.submittedAt || job.startedAt) < POLL_START_MS) return;
-
   const r = await readResultFile(job.responseId);
   if (r.status === "notfound") {
     if (job.errors) { job.errors = 0; await saveJob(job); }
@@ -289,7 +397,11 @@ async function processJob(job) {
   if (r.status !== "ok") {
     job.errors = (job.errors || 0) + 1;
     if (job.errors === 6) {
-      notify("Moonfill: can't read the result folder", `${r.detail || "unknown error"}. Open the SharePoint site in a tab to refresh your session. Still trying.`);
+      notify(
+        "Moonfill: can't read the result folder",
+        `${r.detail || "unknown error"}. Click to open SharePoint and refresh your session. Still trying.`,
+        { kind: "folder", sticky: true }
+      );
     }
     await saveJob(job);
     return;
@@ -303,7 +415,13 @@ async function processJob(job) {
     return;
   }
 
-  await attemptPost(job, withPromo(cleanResult(r.text)), false);
+  // Keep the text right away: the file is deleted ~30 s after it appears, so if posting
+  // fails or is interrupted, Force paste / Copy result still have something to work with
+  const text = withPromo(cleanResult(r.text));
+  job.resultText = text;
+  job.fields = parseMoonpullFields(r.text);
+  await saveJob(job);
+  await attemptPost(job, text, false);
 }
 
 // A waiting result is retried whenever a browser window is focused (so it is visible)
@@ -329,18 +447,23 @@ async function attemptPost(job, text, forced) {
   busy.add(job.id);
   try {
     job.state = "posting";
+    job.trace = []; // step log of this attempt, shown in the popup
     job.postingAt = Date.now();
     job.lastTry = Date.now();
     await saveJob(job);
     await refreshBadge();
 
     const res = await postResultToRecord(job, text, forced);
+    console.log("Moonfill post steps:", (job.trace || []).join(" -> "));
 
     if (res.ok) {
+      job.fillNote = fillNoteOf(res.fill);
       await finishJob(job, "done", null, res.note);
       notify(
         "Moonfill: result pasted",
-        `${label(job)}: ` + (res.note ? "text pasted, click Share to post it." : "posted to Chatter.")
+        `${label(job)}: ` + (res.note ? "text pasted, click Share to post it." : "posted to Chatter.") +
+          (job.fillNote ? " " + job.fillNote + "." : "") + " Click to open the record.",
+        { jobId: job.id, kind: "done", buttons: ["Check result"] }
       );
     } else if (res.hidden && res.retry && !forced) {
       // The window is hidden, so Lightning won't draw the Chatter box. Not a failure: wait.
@@ -352,7 +475,11 @@ async function attemptPost(job, text, forced) {
       if (!job.notifiedParked) {
         job.notifiedParked = true;
         await saveJob(job);
-        notify("Moonfill: result ready", `${label(job)}: it will be pasted as soon as you bring the browser to the front.`);
+        notify(
+          "Moonfill: result ready",
+          `${label(job)}: it will be pasted as soon as you bring the browser to the front.`,
+          { jobId: job.id, kind: "parked", buttons: ["Force paste", "Open Moonfill"] }
+        );
       }
     } else {
       job.resultText = text; // so the popup can offer Copy result / Force paste
@@ -364,20 +491,100 @@ async function attemptPost(job, text, forced) {
 }
 
 // Force paste (from the popup): bring the record forward and post now
+async function forcePost(jobId) {
+  const job = await getJob(jobId);
+  if (!job || !job.resultText || !["failed", "waiting_browser"].includes(job.state)) return;
+  job.error = null;
+  job.finishedAt = null;
+  ensurePolling();
+  await attemptPost(job, job.resultText, true);
+}
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.action !== "forcePost" || !msg.jobId) return;
-  (async () => {
-    const jk = jobKey(msg.jobId);
-    const job = (await chrome.storage.local.get(jk))[jk];
-    if (!job || !job.resultText || !["failed", "waiting_browser"].includes(job.state)) return;
-    job.error = null;
-    job.finishedAt = null;
-    ensurePolling();
-    await attemptPost(job, job.resultText, true);
-  })();
+  forcePost(msg.jobId);
+});
+
+// ---------- New Implementation / IR: open the setup tabs for a MID as one tab group ----------
+// (URL lists taken from Awin Helper.) Buttons live on the Salesforce record / Case page.
+const NI_URLS = (mid) => [
+  `https://ui.awin.com/tracking-settings/us/awin/advertiser/${mid}/main-settings`,
+  `https://ui.awin.com/awin/merchant/${mid}/settings/invite-user`,
+  `https://ui.awin.com/commission-manager/us/awin/merchant/${mid}/commission-groups`,
+  `https://ui.awin.com/advertiser-mastertag/us/awin/${mid}/plugins`,
+  `https://ui.awin.com/advertiser-mastertag/us/awin/${mid}/trackingtagsettings`,
+  `https://ui.awin.com/provider/merchant-settings/${mid}/account-details/network/awin`,
+  `https://ui.awin.com/provider/finance/fee-manager/en/${mid}`,
+  `https://ui.awin.com/provider/merchant-settings/${mid}/mobile-tracking/network/awin`,
+  `https://ui.awin.com/provider/migrated-advertiser-settings/${mid}`,
+  `https://ui.awin.com/provider/pre-join-publishers?advertiserId=${mid}`
+];
+const IR_URLS = (mid) => [
+  `https://ui.awin.com/tracking-settings/us/awin/advertiser/${mid}/main-settings`,
+  `https://ui.awin.com/commission-manager/us/awin/merchant/${mid}/commission-groups`,
+  `https://ui.awin.com/advertiser-mastertag/us/awin/${mid}/plugins`,
+  `https://ui.awin.com/awin/merchant/${mid}/validate-pending/network/awin`,
+  `https://ui.awin.com/advertiser-integration-tool/trackingwizard/us/awin/merchant/${mid}`,
+  `https://ui.awin.com/provider/test-transactions`,
+  `https://ui.awin.com/provider/merchant-settings/${mid}/account-details/network/awin`,
+  `https://ui.awin.com/provider/merchant-settings/${mid}/mobile-tracking/network/awin`,
+  `https://ui.awin.com/provider/finance/fee-manager/en/${mid}`,
+  `https://ui.awin.com/provider/pre-join-publishers?advertiserId=${mid}`,
+  `https://ui.awin.com/provider/migrated-advertiser-settings/${mid}`
+];
+
+async function openTabGroup(urls, title, color) {
+  const tabs = [];
+  for (const url of urls) tabs.push(await chrome.tabs.create({ url, active: false }));
+  const groupId = await chrome.tabs.group({ tabIds: tabs.map((t) => t.id) });
+  await chrome.tabGroups.update(groupId, { title, color });
+}
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (!msg || (msg.action !== "createNITabs" && msg.action !== "createIRTabs")) return;
+  const mid = String(msg.mid || "").replace(/\D/g, "");
+  if (!mid) return;
+  const ni = msg.action === "createNITabs";
+  openTabGroup(ni ? NI_URLS(mid) : IR_URLS(mid), ni ? mid : `${mid} IR`, ni ? "cyan" : "orange")
+    .catch((e) => console.warn("Moonfill: could not open the tabs:", e));
 });
 
 // ---------- post to the record's Chatter feed ----------
+// ---- step log + field fill ----
+function tr(job, msg) {
+  job.trace = job.trace || [];
+  const sec = Math.round((Date.now() - (job.postingAt || Date.now())) / 1000);
+  job.trace.push(`${sec}s ${msg}`);
+  if (job.trace.length > 12) job.trace.shift();
+}
+const describe = (res) =>
+  res.ok ? "ok" : (res.error || "failed") + (res.hidden ? " (page hidden)" : "") + (res.retry ? "" : " (no retry)");
+
+function fillNoteOf(f) {
+  if (!f) return "";
+  if (f.ok === false) return `Fields not filled: ${f.error || "unknown error"}`;
+  const bits = [];
+  if (f.problem && f.problem.length) bits.push("fields to check: " + f.problem.join("; "));
+  if (f.notfound && f.notfound.length) bits.push("not on the page: " + f.notfound.join(", "));
+  if (f.saveFailed) bits.push("fields not saved, check required fields");
+  return bits.join(" · "); // empty = all good, nothing to say
+}
+
+// Posts the result, then (if switched on) fills the Salesforce fields on the same tab
+async function postAndFill(tabId, job, text, opts) {
+  const res = await sendPost(tabId, job, text, opts);
+  if (!res.ok) return res;
+  if (!FILL_FIELDS || !job.fields || !job.fields.length) return res;
+  try {
+    res.fill = await chrome.tabs.sendMessage(tabId, {
+      action: "moonfillFill", recordId: job.recordId, fields: job.fields, save: true
+    });
+  } catch (e) {
+    res.fill = { ok: false, error: e.message };
+  }
+  return res;
+}
+const keepsTabOpen = (res) => !!(res && res.ok && res.fill && res.fill.keepOpen);
+
 async function sendPost(tabId, job, text, opts) {
   // A freshly opened tab needs a moment before its content script answers
   for (let i = 0; i < 40; i++) {
@@ -400,6 +607,32 @@ async function sendPost(tabId, job, text, opts) {
   return { ok: false, retry: true, error: "Salesforce page did not respond" };
 }
 
+// Opens the record in its own focused window, pastes, and closes it again.
+// Closing it normally hands focus back to the app that was in front (Word, Teams...).
+async function postInNewWindow(job, text) {
+  let win = null;
+  let res = null;
+  try {
+    win = await chrome.windows.create({
+      url: job.recordUrl, type: "normal", focused: true, state: "normal", width: 1200, height: 800
+    });
+    tr(job, "temporary window opened");
+    const tabId = win.tabs && win.tabs[0] && win.tabs[0].id;
+    if (!tabId) { res = { ok: false, retry: true, hidden: true, error: "could not open a window" }; return res; }
+    res = await postAndFill(tabId, job, text, { fast: false, activated: true });
+    tr(job, "temporary window: " + describe(res));
+    if (res.ok && (!AUTO_SHARE || keepsTabOpen(res))) { win = null; return res; } // leave it open for review
+    if (res.ok) await sleep(1500); // let Share / Save settle
+    return res;
+  } catch (e) {
+    tr(job, "temporary window error: " + e.message);
+    res = { ok: false, retry: true, hidden: true, error: "temporary window: " + e.message };
+    return res;
+  } finally {
+    if (win) { try { await chrome.windows.remove(win.id); } catch (e) { /* already closed */ } }
+  }
+}
+
 async function postResultToRecord(job, text, forced) {
   const [prev] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
 
@@ -420,29 +653,39 @@ async function postResultToRecord(job, text, forced) {
     activated = true;
   };
 
+  let res = null;
   try {
     if (forced) {
       await bringForward();
-      return await sendPost(tab.id, job, text, { fast: false, activated: true });
+      res = await postAndFill(tab.id, job, text, { fast: false, activated: true });
+      tr(job, "force paste: " + describe(res));
+      return res;
     }
     // 1. quietly, in a background tab
-    let res = await sendPost(tab.id, job, text, { fast: true, activated: false });
-    // 2. make it the active tab of its window (no focus stolen) and try again
+    res = await postAndFill(tab.id, job, text, { fast: true, activated: false });
+    tr(job, "background tab: " + describe(res));
+    // 2. make it the active tab of its window (no focus stolen) and try again, patiently
     if (!res.ok && res.retry) {
       await bringForward();
-      res = await sendPost(tab.id, job, text, { fast: true, activated: true });
+      res = await postAndFill(tab.id, job, text, { fast: false, activated: true });
+      tr(job, "active tab: " + describe(res));
+    }
+    // 3. any retryable failure left (window hidden behind other apps, page too slow...):
+    //    a temporary window in front, which pastes and closes itself
+    if (!res.ok && res.retry && AUTO_WINDOW) {
+      res = await postInNewWindow(job, text);
     }
     return res;
   } finally {
     if (opened) {
-      if (AUTO_SHARE) {
+      if (AUTO_SHARE && !keepsTabOpen(res)) {
         await sleep(1500);
         try { await chrome.tabs.remove(tab.id); } catch (e) { /* already closed */ }
       } else {
         await chrome.tabs.update(tab.id, { active: true }); // leave it open for review
       }
     }
-    if (activated && AUTO_SHARE && prev && prev.id !== tab.id) {
+    if (activated && AUTO_SHARE && prev && prev.id !== tab.id && !keepsTabOpen(res)) {
       try { await chrome.tabs.update(prev.id, { active: true }); } catch (e) { /* gone */ }
     }
   }

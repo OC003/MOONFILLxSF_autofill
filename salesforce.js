@@ -195,26 +195,66 @@ function getProgramName() {
   return null;
 }
 
-// --- Inject button ---
+// --- Buttons: look + spacing ---
+const BUTTON_GAP_PX = 24; // space between the buttons: raise it for even more room
+
+function injectStyles() {
+  if (document.getElementById("moonfillStyle")) return;
+  const st = document.createElement("style");
+  st.id = "moonfillStyle";
+  st.textContent = `
+    .mf-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px ${BUTTON_GAP_PX}px;margin:16px 0 8px;padding:2px 0}
+    .mf-row.mf-single{justify-content:flex-start}
+    .mf-btn{display:inline-flex;align-items:center;gap:9px;min-height:38px;padding:9px 22px;border:0;border-radius:999px;
+      color:#fff;font:600 13px/1 -apple-system,"Segoe UI",system-ui,sans-serif;letter-spacing:.02em;cursor:pointer;
+      box-shadow:0 3px 8px rgba(15,23,42,.28),inset 0 1px 0 rgba(255,255,255,.22);
+      transition:transform .12s ease,box-shadow .12s ease,filter .12s ease}
+    .mf-btn .mf-ico{font-size:16px;line-height:1}
+    .mf-btn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.1);
+      box-shadow:0 6px 14px rgba(15,23,42,.32),inset 0 1px 0 rgba(255,255,255,.22)}
+    .mf-btn:active:not(:disabled){transform:translateY(0);filter:brightness(.95)}
+    .mf-btn:focus-visible{outline:3px solid rgba(23,167,232,.5);outline-offset:2px}
+    .mf-btn:disabled{background:#b9c0c8!important;box-shadow:none;cursor:not-allowed;opacity:.9}
+    .mf-moon{background:linear-gradient(135deg,#0b2354,#1f54a2)}
+    .mf-impl{background:linear-gradient(135deg,#1493d0,#17a7e8)}
+    .mf-ir{background:linear-gradient(135deg,#f8d559,#f5b933);color:#0b2354;text-shadow:none}
+  `;
+  document.head.appendChild(st);
+}
+
+function makeButton(cls, icon, text, { enabled, title, onClick }) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `mf-btn ${cls}`;
+  const i = document.createElement("span");
+  i.className = "mf-ico";
+  i.textContent = icon;
+  const t = document.createElement("span");
+  t.textContent = text;
+  b.append(i, t);
+  b.title = title || "";
+  if (enabled) b.addEventListener("click", onClick);
+  else b.disabled = true;
+  return b;
+}
+
+// --- Inject buttons (record page): Moonpull form | New Implementation | IR ---
 function injectButton(cardBody, mid, geo) {
+  injectStyles();
   activeRoot().querySelectorAll("#moonfillSalesforceSection").forEach((e) => e.remove());
 
   const container = document.createElement("div");
   container.id = "moonfillSalesforceSection";
+  container.className = "mf-row";
   container.dataset.recordId = getRecordIdFromUrl() || "";
-  container.style.marginTop = "10px";
 
-  const button = document.createElement("button");
-  button.textContent = "🌙 Submit Moonpull form";
-  button.style.cssText = `
-    display:inline-flex;align-items:center;background-color:${mid && mid.length >=3 ? "#015475":"#ccc"};
-    color:white;font-weight:600;padding:6px 12px;border:none;border-radius:8px;
-    cursor:${mid && mid.length >=3 ? "pointer":"not-allowed"};
-    box-shadow:0 2px 6px rgba(0,0,0,0.2);
-  `;
+  const hasMid = !!(mid && mid.length >= 3);
+  const noMid = "MID not found on this record";
 
-  if (mid && mid.length >=3) {
-    button.addEventListener("click", () => {
+  container.appendChild(makeButton("mf-moon", "🌙", "Submit Moonpull form", {
+    enabled: hasMid,
+    title: hasMid ? "Fill and submit the Moonpull form for this MID" : noMid,
+    onClick: () => {
       const url = "https://forms.cloud.microsoft/pages/responsepage.aspx?id=07KaWlh7JUWYUdFycma616fCV2xjqwdEqzYTwuOkzBJUMU5JTTM1MTdVTVY5OVNKTk1TREtLU0wxUS4u&lang=en";
       const recordId = getRecordIdFromUrl();
       // Everything this scan needs travels with the click: no shared storage slot
@@ -227,12 +267,72 @@ function injectButton(cardBody, mid, geo) {
         recordId,
         recordUrl: recordId ? `${location.origin}/lightning/r/TSE__c/${recordId}/view` : null
       });
-    });
-  }
+    }
+  }));
 
-  container.appendChild(button);
+  const digits = (mid || "").replace(/\D/g, "");
+  container.appendChild(makeButton("mf-ir", "🔎", "IR", {
+    enabled: !!digits,
+    title: digits ? "Open the Internal Review tabs for this MID" : noMid,
+    onClick: () => chrome.runtime.sendMessage({ action: "createIRTabs", mid: digits })
+  }));
+  container.appendChild(makeButton("mf-impl", "🚀", "New Implementation", {
+    enabled: !!digits,
+    title: digits ? "Open the New Implementation tabs for this MID" : noMid,
+    onClick: () => chrome.runtime.sendMessage({ action: "createNITabs", mid: digits })
+  }));
+
   cardBody.appendChild(container);
-  console.log("✅ Button injected");
+  console.log("✅ Buttons injected");
+}
+
+// --- Case page: one IR button, above the "Case Details" card ---
+const getCaseIdFromUrl = () =>
+  (location.pathname.match(/\/lightning\/r\/Case\/([a-zA-Z0-9]{15,18})\/view/) || [])[1] || null;
+
+// MID = "Awin UI Link" inside the "Program (Signed Product) Details" card
+function readCaseMid() {
+  const card = Array.from(activeRoot().querySelectorAll("article.slds-card")).find((c) => {
+    const t = c.querySelector('div[role="heading"] a.slds-card__header-link, div[role="heading"] span.slds-card__header-title, .slds-card__header-link span');
+    return t && t.textContent.trim().toLowerCase() === "program (signed product) details";
+  });
+  if (!card) return null;
+  const label = Array.from(card.querySelectorAll("span.test-id__field-label, .slds-form-element__label"))
+    .find((l) => l.textContent.trim().toLowerCase() === "awin ui link");
+  const item = label && label.closest(".slds-form-element");
+  if (!item) return null;
+  const hit = Array.from(item.querySelectorAll("lightning-formatted-rich-text, lightning-formatted-text, lightning-formatted-number, output, a, span.test-id__field-value"))
+    .map((e) => e.textContent.trim())
+    .find((t) => /^\d+$/.test(t) && t !== "0");
+  return hit || null;
+}
+
+function ensureCaseButton() {
+  const caseId = getCaseIdFromUrl();
+  if (!caseId) return;
+  const root = activeRoot();
+  const mid = readCaseMid() || "";
+  const current = root.querySelector("#moonfillCaseSection");
+  if (current && current.dataset.caseId === caseId && current.dataset.mid === mid && isVisible(current)) return;
+
+  const header = Array.from(root.querySelectorAll(".slds-card__header-title"))
+    .find((e) => e.textContent.trim().toLowerCase() === "case details" && isVisible(e));
+  const card = header && header.closest(".slds-card");
+  if (!card || !card.parentElement) return; // page not drawn yet: next tick tries again
+
+  injectStyles();
+  root.querySelectorAll("#moonfillCaseSection").forEach((e) => e.remove());
+  const section = document.createElement("div");
+  section.id = "moonfillCaseSection";
+  section.className = "mf-row mf-single";
+  section.dataset.caseId = caseId;
+  section.dataset.mid = mid;
+  section.appendChild(makeButton("mf-ir", "🔎", "IR", {
+    enabled: !!mid,
+    title: mid ? `Open the Internal Review tabs for MID ${mid}` : "MID not found in Program (Signed Product) Details yet",
+    onClick: () => chrome.runtime.sendMessage({ action: "createIRTabs", mid })
+  }));
+  card.parentElement.insertBefore(section, card);
 }
 
 // --- Core record processing ---
@@ -387,6 +487,208 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // async response
 });
 
+// ============================================================
+// 🌙 Fill Salesforce fields from the Moonpull result.
+// Called by background.js right after the result was pasted. Same approach as Techfill:
+// open the Details tab, edit mode, set each field, Save. Existing values are OVERRIDDEN.
+// ============================================================
+const FF_SAVE = 'button[name="SaveEdit"]';
+const FF_CANCEL = 'button[name="CancelEdit"]';
+let ffFooterOutside = false; // some layouts draw the Save footer outside the Details tab
+
+const ffNorm = (s) => String(s || "").replace(/\s+/g, " ").replace(/\*/g, "").trim().toLowerCase();
+const ffVisibleAll = (sel) => Array.from(activeRoot().querySelectorAll(sel)).filter(isVisible);
+
+// The Details tab content: everything we click or fill lives in here, so the
+// "Key Fields" box at the top of some records (its own pencil) is never touched.
+function ffDetailsPanel() {
+  const tab = ffVisibleAll('a[data-tab-value="detailTab"]')[0];
+  if (!tab || tab.getAttribute("aria-selected") !== "true") return null;
+  const id = tab.getAttribute("aria-controls");
+  const byId = id && document.getElementById(id);
+  if (byId && isVisible(byId)) return byId;
+  return ffVisibleAll('[role="tabpanel"]').find((p) => p.querySelector(".test-id__field-label, .slds-form-element__label")) || null;
+}
+const ffScope = () => ffDetailsPanel() || activeRoot();
+const ffInScope = (sel) => Array.from(ffScope().querySelectorAll(sel)).filter(isVisible);
+
+function ffLabelText(el) {
+  const c = el.cloneNode(true);
+  c.querySelectorAll(".slds-assistive-text, lightning-helptext, abbr, button, svg").forEach((n) => n.remove());
+  return ffNorm(c.textContent);
+}
+
+function ffFindFieldBox(label) {
+  const want = ffNorm(label);
+  const labels = ffScope().querySelectorAll(".slds-form-element__label, .slds-form-element__legend, .test-id__field-label");
+  for (const l of labels) {
+    if (!isVisible(l) || ffLabelText(l) !== want) continue;
+    const box = l.closest(".slds-form-element");
+    if (box) return box;
+  }
+  return null;
+}
+
+function ffControlOf(box) {
+  if (box.querySelector(".slds-dual-listbox")) return { kind: "multi" };
+  const checkbox = box.querySelector('input[type="checkbox"]');
+  if (checkbox) return { kind: "checkbox", el: checkbox };
+  const radios = Array.from(box.querySelectorAll('input[type="radio"]'));
+  if (radios.length) return { kind: "radio", els: radios };
+  const combo = box.querySelector('button[role="combobox"]');
+  if (combo) return { kind: "combobox", el: combo };
+  const select = box.querySelector("select");
+  if (select) return { kind: "select", el: select };
+  if (box.querySelector('input[role="combobox"]')) return { kind: "lookup" };
+  return null;
+}
+
+function ffComboOptions(btn) {
+  const scopeEl = btn.closest(".slds-combobox") || btn.closest(".slds-form-element") || activeRoot();
+  return Array.from(scopeEl.querySelectorAll('[role="option"], lightning-base-combobox-item')).filter(isVisible);
+}
+function ffOptionText(o) {
+  const c = (o.querySelector(".slds-truncate, .slds-media__body") || o).cloneNode(true);
+  c.querySelectorAll(".slds-assistive-text, svg, lightning-icon").forEach((n) => n.remove());
+  return ffNorm(c.textContent);
+}
+const ffOptionMatches = (o, want) => {
+  const w = ffNorm(want);
+  return ffOptionText(o) === w || ffNorm(o.getAttribute("data-value")) === w;
+};
+
+// Picklists (Yes / No / list of options). Always overrides.
+async function ffSetCombobox(btn, value) {
+  if (ffNorm(btn.textContent) === ffNorm(value)) return { status: "same" };
+  let opt = null;
+  for (let attempt = 0; attempt < 2 && !opt; attempt++) { // the first click can be swallowed
+    btn.click();
+    opt = await waitFor(() => ffComboOptions(btn).find((o) => ffOptionMatches(o, value)), 2500, 150);
+    if (!opt) {
+      if (btn.getAttribute("aria-expanded") === "true") btn.click();
+      await sleep(250);
+    }
+  }
+  if (!opt) {
+    btn.click();
+    await sleep(300);
+    const seen = ffComboOptions(btn).map(ffOptionText).filter(Boolean);
+    if (btn.getAttribute("aria-expanded") === "true") btn.click();
+    return {
+      status: "problem",
+      why: seen.length ? `option "${value}" not in the list (saw: ${seen.slice(0, 8).join(" | ")})` : "the dropdown did not open"
+    };
+  }
+  realClick(opt);
+  await sleep(200);
+  return { status: "set" };
+}
+
+function ffSetSelect(sel, value) {
+  const cur = sel.selectedOptions[0] ? ffNorm(sel.selectedOptions[0].text) : "";
+  if (cur === ffNorm(value)) return { status: "same" };
+  const opt = Array.from(sel.options).find((o) => ffNorm(o.text) === ffNorm(value) || ffNorm(o.value) === ffNorm(value));
+  if (!opt) return { status: "problem", why: `option "${value}" not in the list` };
+  sel.value = opt.value;
+  sel.dispatchEvent(new Event("input", { bubbles: true }));
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+  return { status: "set" };
+}
+
+function ffSetRadio(radios, value) {
+  const textOf = (r) => ffNorm((r.closest(".slds-radio") || r.parentElement).textContent);
+  const target = radios.find((r) => textOf(r) === ffNorm(value));
+  if (!target) return { status: "problem", why: `option "${value}" not found` };
+  if (target.checked) return { status: "same" };
+  target.click();
+  return { status: "set" };
+}
+
+async function ffApplyField({ label, value }) {
+  const box = ffFindFieldBox(label);
+  if (!box) return { status: "notfound" };
+  const c = ffControlOf(box);
+  if (!c) return { status: "problem", why: "no editable control (read-only?)" };
+  try {
+    switch (c.kind) {
+      case "combobox": return await ffSetCombobox(c.el, value);
+      case "select": return ffSetSelect(c.el, value);
+      case "radio": return ffSetRadio(c.els, value);
+      default: return { status: "problem", why: "unsupported field type" };
+    }
+  } catch (e) {
+    return { status: "problem", why: String((e && e.message) || e) };
+  }
+}
+
+const ffSaveButton = () => ffInScope(FF_SAVE)[0] || (ffFooterOutside ? ffVisibleAll(FF_SAVE)[0] : null) || null;
+const ffEditTrigger = () => ffInScope("button.test-id__inline-edit-trigger")[0] || null;
+
+async function ffOpenDetailsTab() {
+  const tab = ffVisibleAll('a[data-tab-value="detailTab"]')[0];
+  if (!tab) return;
+  if (tab.getAttribute("aria-selected") !== "true") realClick(tab);
+  await waitFor(() => ffDetailsPanel() && (ffEditTrigger() || ffSaveButton()), 8000);
+}
+
+function ffExpandSections() {
+  ffInScope('button.slds-section__title-action[aria-expanded="false"], button.slds-accordion__summary-action[aria-expanded="false"]')
+    .forEach((b) => b.click());
+}
+
+async function ffEnsureEditMode() {
+  ffFooterOutside = false;
+  if (ffSaveButton()) return true;
+  const trigger = ffEditTrigger();
+  if (!trigger) return false;
+  trigger.click();
+  const found = await waitFor(() => ffSaveButton() || ffVisibleAll(FF_SAVE)[0], 8000);
+  if (found && !ffSaveButton()) ffFooterOutside = true;
+  return !!found;
+}
+
+async function fillMoonpullFields(recordId, fields, save) {
+  if (getRecordIdFromUrl() !== recordId) return { ok: false, error: "the page is not on the expected record" };
+  if (document.visibilityState !== "visible") return { ok: false, error: "the page is not visible" };
+  const rep = { ok: true, set: [], same: [], notfound: [], problem: [], saved: false, keepOpen: false, saveFailed: false };
+
+  await ffOpenDetailsTab();
+  ffExpandSections();
+  await sleep(300);
+  if (!(await ffEnsureEditMode())) return { ok: false, error: "could not open edit mode on the Details tab" };
+  await sleep(300);
+
+  for (const f of fields) {
+    if (getRecordIdFromUrl() !== recordId) return { ...rep, ok: false, error: "moved to another record while filling" };
+    const r = await ffApplyField(f);
+    if (r.status === "problem") rep.problem.push(`${f.label}: ${r.why}`);
+    else rep[r.status].push(f.label);
+  }
+
+  if (!rep.set.length) { // nothing changed: leave edit mode cleanly
+    const cancel = ffInScope(FF_CANCEL)[0] || ffVisibleAll(FF_CANCEL)[0];
+    if (cancel) cancel.click();
+    return rep;
+  }
+  if (!save) { rep.keepOpen = true; return rep; } // review mode: user clicks Save
+
+  const btn = ffSaveButton() || ffVisibleAll(FF_SAVE)[0];
+  if (!btn) { rep.keepOpen = true; rep.saveFailed = true; return rep; }
+  btn.click();
+  const closed = await waitFor(() => !ffVisibleAll(FF_SAVE).length, 12000);
+  rep.saved = !!closed;
+  if (!closed) { rep.keepOpen = true; rep.saveFailed = true; }
+  return rep;
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.action !== "moonfillFill") return;
+  fillMoonpullFields(msg.recordId, msg.fields || [], !!msg.save)
+    .then(sendResponse)
+    .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
+  return true; // async response
+});
+
 // --- 🔁 Self-healing loop ---
 // No navigation detection: every second, make sure the ACTIVE record page has a
 // button tagged with the current record ID, and build it if not. Works whether you
@@ -397,6 +699,7 @@ function buttonIsCurrent() {
 }
 
 setInterval(() => {
+  try { ensureCaseButton(); } catch (e) { /* page mid-redraw: next tick */ }
   const id = getRecordIdFromUrl();
   if (!id || processing || buttonIsCurrent()) return;
   if (failedUntil[id] && Date.now() < failedUntil[id]) return;
