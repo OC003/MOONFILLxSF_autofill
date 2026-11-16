@@ -1,0 +1,12 @@
+{
+  "name": "moonfill-checklist-autofill-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "for f in ../*.js; do node --check \"$f\" || exit 1; done"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

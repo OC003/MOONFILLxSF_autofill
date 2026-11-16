@@ -1,0 +1,55 @@
+// Runtime settings for the Technical Checklist autofill extension.
+// Selectors are lists: entries cover Salesforce Lightning and the bundled mock pages. The Lightning
+// ones follow Moonfill (github.com/OptimusRodier/moonfill), which fills fields on awin.lightning.force.com,
+// but the Technical Checklist itself is unverified. Use the panel's "Check page" report to correct them.
+globalThis.TCA_CONFIG = {
+  version: '0.5.0',
+  checklistTitle: 'Technical Checklist',
+
+  // Date fields (Pixel Sent, Successful Tracking Test) are typed in this format, as a user would type
+  // them. It also sets the day/month order used to read numeric dates such as 03/11/2026.
+  // For a US-locale Salesforce user, change it to 'MM/DD/YYYY'.
+  dateFormat: 'DD/MM/YYYY',
+
+  // Where Pixel Sent's date comes from: the line in the record's history box marking its creation.
+  history: {
+    title: 'Implementation History',      // box title; a count such as "(6)" or "(10+)" after it is fine
+    createdText: ['Created.', 'Created']  // text of the cell that marks the creation line
+  },
+
+  selectors: {
+    // The visible record page. Lightning keeps recently viewed records in the page, hidden.
+    activeRoot: '.oneContent.active',
+    // Elements whose text may be the checklist's title.
+    title: 'h1, h2, h3, h4, span, button, a, legend, [role="heading"]',
+    // Container holding one checklist: nearest ancestor of the title that contains checklist fields.
+    section: 'records-record-layout-section, force-record-layout-section, flexipage-field-section2, .slds-section, section',
+    // A field's label element.
+    label: '.test-id__field-label, .slds-form-element__label, .slds-form-element__legend, .field-label, label, legend',
+    // One field (label + value or control). Tried in this order; first match wins.
+    item: ['records-record-layout-item', 'force-record-layout-item', '.field-row', '.slds-form-element'],
+    // Read-only value outside edit mode.
+    viewValue: '.test-id__field-value, .slds-form-element__static, .field-value',
+    // Pencil (inline edit) button in a field.
+    editButton: 'button.test-id__inline-edit-trigger, button[title^="Edit "]',
+    // Lightning picklist trigger, and its options once opened.
+    combobox: 'button[role="combobox"]',
+    option: '[role="option"], lightning-base-combobox-item',
+    // Section expand/collapse toggle.
+    sectionToggle: 'button.slds-section__title-action, button.slds-accordion__summary-action',
+    native: 'select, textarea, input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([role="combobox"])',
+    // Shared Save button shown in edit mode (by name, or a "Save" button in the edit footer).
+    saveButton: 'button[name="SaveEdit"]',
+    saveFooter: 'records-form-footer, force-record-edit-footer, .slds-docked-form-footer',
+    // Messages shown when a save fails.
+    error: 'records-record-edit-error, .forceFormPageError, .pageLevelErrors, .slds-popover_error, .slds-has-error .slds-form-element__help, .save-error',
+    // The history box (a related-list card) and one line within it (table row or tile).
+    historyCard: 'article, .slds-card, lst-related-list-single-container, force-related-list-single-container, section',
+    historyRow: 'tr, [role="row"], li, .slds-tile',
+    // Text that is not part of a label: required asterisk, screen-reader text, help icon.
+    labelNoise: '.slds-assistive-text, abbr, .slds-required, lightning-helptext, lightning-icon, button, svg'
+  },
+
+  timeouts: { editMode: 8000, dropdown: 3000, save: 15000, readBack: 8000 },
+  pollMs: 150
+};
