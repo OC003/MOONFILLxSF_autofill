@@ -89,6 +89,27 @@
     await save();
   }
 
+  // Platform detection: the optional "read websites" permission, granted or removed here. request()
+  // must run straight from the click (no await before it), or the browser refuses to ask.
+  const SITES = { origins: ['https://*/*', 'http://*/*'] };
+  const permissions = () => (globalThis.chrome && chrome.permissions) || null;
+  async function showDetection() {
+    const p = permissions();
+    const button = $('detect-toggle');
+    if (!p) { $('detect-status').textContent = 'Not available on this page.'; button.hidden = true; return; }
+    const on = await p.contains(SITES);
+    $('detect-status').textContent = on ? 'Allowed: Auto-detect reads the client\'s site when you click Fill.' : 'Not allowed yet: the default fill is used.';
+    button.textContent = on ? 'Turn off' : 'Allow platform detection';
+    button.dataset.on = String(on);
+    button.hidden = false;
+  }
+  $('detect-toggle').addEventListener('click', () => {
+    const p = permissions();
+    const on = $('detect-toggle').dataset.on === 'true';
+    (on ? p.remove(SITES) : p.request(SITES)).catch(() => false).then(showDetection);
+  });
+  showDetection();
+
   for (const format of S.DATE_FORMATS) $('date-format').append(new Option(format, format));
   $('date-format').addEventListener('change', () => status(''));
   $('fields').append(...fields.map(row));

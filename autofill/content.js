@@ -6,9 +6,13 @@
   const teamFields = globalThis.TCA_FIELDS;
   const engine = globalThis.TCAEngine;
   const settings = globalThis.TCASettings;
-  // Team defaults with the user's own settings applied; refreshed before every run and on change.
-  let { fields, cfg, changed: personal } = settings.apply(teamFields, teamCfg, {});
-  const refresh = async () => { ({ fields, cfg, changed: personal } = settings.apply(teamFields, teamCfg, await settings.load())); };
+  const templates = globalThis.TCA_TEMPLATES || [];
+  const T = globalThis.TCATemplates;
+  // Layers, last wins: team defaults → platform template (empty fields only) → the user's own settings.
+  let saved = {};
+  const effective = template => settings.apply(T.applyTemplate(teamFields, template), teamCfg, saved);
+  let { fields, cfg, changed: personal } = effective(null);
+  const refresh = async () => { saved = await settings.load(); ({ fields, cfg, changed: personal } = effective(null)); };
   const summary = () => {
     const targets = engine.planTargets(fields).targets;
     return `Fills ${targets.length} fields: ${targets.filter(f => !f.rule).length} values and ${targets.filter(f => f.rule).length} dates. ` +
@@ -19,7 +23,7 @@
   const isSalesforce = location.protocol === 'https:' && location.hostname === 'awin.lightning.force.com';
   if ((!isMock && !isSalesforce) || document.getElementById('tca-root')) return;
 
-  const state = { running: false, ready: false, expanded: isMock, status: '', message: '', report: '' };
+  const state = { running: false, ready: false, expanded: isMock, status: '', message: '', report: '', template: 'auto' };
 
   const host = document.createElement('div');
   host.id = 'tca-root';
@@ -52,6 +56,11 @@
 <div class="panel collapsed">
   <button class="head" type="button" aria-expanded="false"><span class="dot"></span><span>Checklist Autofill</span><span class="found"></span></button>
   <div class="body">
+    <div class="row"><label>Template <select class="template">
+      <option value="auto">Auto-detect platform</option>
+      <option value="none">Default (no template)</option>
+      ${templates.map(t => `<option value="${t.name}">${t.name}</option>`).join('')}
+    </select></label></div>
     <div class="note summary"></div>
     <div class="row">
       <button class="act check" type="button">Check page</button>
@@ -76,6 +85,7 @@
     $('.found').textContent = state.running ? 'working…' : state.ready ? `${cfg.checklistTitle} found` : 'checklist not found';
     for (const b of shadow.querySelectorAll('.fill, .save')) b.disabled = state.running || !state.ready;
     $('.check').disabled = state.running;
+    $('.template').disabled = state.running;
     $('.summary').textContent = summary();
     const status = $('.status');
     if (state.status) status.dataset.state = state.status; else delete status.dataset.state;
@@ -92,18 +102,51 @@
     if (ready !== state.ready) { state.ready = ready; paint(); }
   }
 
+  // Ask the background script to read the client's site ('fetch' = invisibly, 'tab' = background tab).
+  const readSite = (url, via) => Promise.resolve()
+    .then(() => chrome.runtime.sendMessage({ action: 'tcaReadSite', url, via }))
+    .then(answer => answer || { error: 'no answer' }, error => ({ error: error.message }));
+
+  const say = message => { state.message = message; paint(); };
+
+  // The template for this run: the one picked in the panel, or the detected platform's.
+  // Anything unclear means no template (the default fill), with a note saying why.
+  async function chooseTemplate(notes) {
+    if (state.template === 'none') return null;
+    if (state.template !== 'auto') return templates.find(t => t.name === state.template) || null;
+    const site = engine.landingPageUrl(document, cfg);
+    if (!site.url) { notes.push(`No template: ${site.reason}, so the default fill was used.`); return null; }
+    say('Detecting the platform…');
+    const page = await readSite(site.url, 'fetch');
+    if (page.error === 'permission') { notes.push('No template: platform detection isn\'t allowed yet (turn it on in Settings), so the default fill was used.'); return null; }
+    let found = page.ok ? T.detect(page.text, cfg) : { name: null, reason: page.error ? `the site couldn't be read (${page.error})` : `the site answered ${page.status}` };
+    if (!found.name) {
+      say('Checking the site in a background tab…');
+      const tab = await readSite(site.url, 'tab');
+      if (tab.ok) found = T.detect(tab.text, cfg);
+    }
+    if (!found.name) { notes.push(`No template: ${found.reason}, so the default fill was used.`); return null; }
+    notes.push(`Detected ${found.name}: template applied.`);
+    return templates.find(t => t.name === found.name) || null;
+  }
+
   async function act(mode) {
     if (state.running) return;
     Object.assign(state, { running: true, status: 'running', message: mode === 'save' ? 'Filling and saving…' : 'Filling…', report: '' });
     paint();
     let result;
+    const notes = [];
     try {
       await refresh();
-      result = await engine.run(document, cfg, fields, { mode });
+      const template = await chooseTemplate(notes);
+      if (template && state.template !== 'auto') notes.push(`${template.name} template applied.`);
+      say(mode === 'save' ? 'Filling and saving…' : 'Filling…');
+      const run = effective(template);
+      result = await engine.run(document, run.cfg, run.fields, { mode });
     } catch (error) {
       result = { status: 'failed', message: `Unexpected error: ${error.message}` };
     }
-    Object.assign(state, { running: false, status: result.status, message: result.message });
+    Object.assign(state, { running: false, status: result.status, message: [...notes, result.message].join(' ') });
     paint();
     detect();
   }
@@ -112,7 +155,8 @@
     let report;
     try {
       await refresh();
-      report = engine.checkPage(document, cfg, fields, { pageType: isMock ? 'mock page' : 'Salesforce Lightning', personal });
+      const template = state.template === 'auto' ? 'auto-detect (runs on Fill)' : state.template === 'none' ? 'default (no template)' : state.template;
+      report = engine.checkPage(document, cfg, fields, { pageType: isMock ? 'mock page' : 'Salesforce Lightning', personal, template });
     } catch (error) {
       report = `Page check failed: ${error.message}`;
     }
@@ -134,11 +178,11 @@
 
   $('.head').addEventListener('click', () => { state.expanded = !state.expanded; paint(); });
   $('.check').addEventListener('click', check);
+  $('.template').addEventListener('change', e => { state.template = e.target.value; });
   $('.fill').addEventListener('click', () => act('fill'));
   $('.save').addEventListener('click', () => act('save'));
   $('.settings').addEventListener('click', () => {
-    // Opened directly (the page is web-accessible on Salesforce only), so Moonfill's background
-    // script needs no changes.
+    // Opened directly: the settings page is web-accessible on Salesforce only.
     try { window.open(chrome.runtime.getURL('autofill/options.html'), '_blank'); } catch { state.message = 'Open Settings from edge://extensions → Moonfill → Details → Extension options.'; paint(); }
   });
   settings.onChange(() => refresh().then(paint));

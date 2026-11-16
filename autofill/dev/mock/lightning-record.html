@@ -34,6 +34,7 @@
       <option value="collapsed">Checklist section collapsed</option>
       <option value="no-history">No "Created." line in history</option>
       <option value="dates-filled">Date fields already filled</option>
+      <option value="no-landing">No Landing Page URL</option>
     </select>
   </label>
 </div>
@@ -56,6 +57,7 @@
     const kind = DATE.includes(f.label) ? 'date' : AREA.includes(f.label) ? 'textarea' : TEXT.includes(f.label) ? 'text' : 'picklist';
     const options = ['--None--', 'Yes', 'No', 'Unknown', 'Other'];
     if (f.value && !options.includes(f.value)) options.push(f.value);
+    for (const t of globalThis.TCA_TEMPLATES || []) { const v = t.values[f.label]; if (v && !options.includes(v)) options.push(v); }
     return { label: f.label, kind, options, required: f.label === 'Img tag implemented' };
   };
   const technical = globalThis.TCA_FIELDS.map(field);
@@ -178,6 +180,11 @@
     const app = document.getElementById('app');
     app.replaceChildren(h('div', { class: 'record' },
       h('h1', { text: 'IMP-0001 · Fictional Retailer Ltd (mock)' }),
+      scenario === 'no-landing' ? null : h('records-record-layout-item', { 'field-label': 'Landing Page URL' },
+        h('div', { class: 'slds-form-element slds-form-element_readonly' },
+          h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Landing Page URL' })),
+          h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value' },
+            shadowHost('lightning-formatted-url', h('a', { href: 'https://shop.example.com/', text: 'shop.example.com' })))))),
       ...sections.map(s => sectionEl(s, draft || record, !!draft, true)),
       historyCard('03/11/2026', scenario !== 'no-history'),
       draft ? h('records-form-footer', { class: 'slds-docked-form-footer' },

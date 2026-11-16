@@ -37,6 +37,7 @@
       <option value="duplicate">Two Technical Checklists</option>
       <option value="no-history">No "Created." line in history</option>
       <option value="dates-filled">Date fields already filled</option>
+      <option value="no-landing">No Landing Page URL</option>
     </select>
   </label>
 </div>
@@ -63,7 +64,8 @@
 
   function makeField(label, value) {
     const type = TEXT.has(label) || DATE.has(label) ? 'text' : CHECKBOX.has(label) ? 'checkbox' : 'select';
-    const options = type === 'select' ? [...new Set([...BASE, ...(value ? [value] : []), 'Other'])] : null;
+    const fromTemplates = (globalThis.TCA_TEMPLATES || []).map(t => t.values[label]).filter(Boolean);
+    const options = type === 'select' ? [...new Set([...BASE, ...(value ? [value] : []), ...fromTemplates, 'Other'])] : null;
     return { label, type, options };
   }
 
@@ -162,6 +164,11 @@
   }
 
   window.mockRecord = record;
+  // The client's site, in the record header (plain text here, as a typed value).
+  if (scenario !== 'no-landing') {
+    document.querySelector('header.record').append(el('div', { className: 'field-row' },
+      el('span', { className: 'field-label', textContent: 'Landing Page URL' }), el('span', { className: 'field-value', textContent: 'www.example-shop.com' })));
+  }
   render();
 })();
 </script>

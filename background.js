@@ -734,3 +734,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     if (formTabs && formTabs.length > 0) finishAndClose(formTabs[0].id);
   });
 });
+
+// Checklist Autofill: reads a client's site for platform detection (see autofill/background.js).
+try { importScripts("autofill/background.js"); } catch (e) { console.error("Checklist Autofill background failed to load", e); }

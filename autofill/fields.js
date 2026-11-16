@@ -1,4 +1,4 @@
-// Generated from dev/field-specification.json (captured 2026-10-30, updated 2026-11-16). Do not edit by hand; tests check they match.
+// Generated from dev/field-specification.json (updated 2026-11-16). Do not edit by hand: run `npm run generate`; tests check they match.
 globalThis.TCA_FIELDS = [
   {
     "label": "Pixel Sent",
@@ -228,5 +228,149 @@ globalThis.TCA_FIELDS = [
     "label": "Consent Management Platform",
     "excluded": false,
     "value": "Other"
+  }
+];
+globalThis.TCA_TEMPLATES = [
+  {
+    "name": "BigCommerce",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "BigCommerce plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Bigcommerce",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Lightspeed",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Lightspeed plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Lightspeed",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Magento",
+    "values": {
+      "Deduplication Solution": "Magento",
+      "Tag Management Solution": "Magento",
+      "eCommerce platform": "Magento",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "OpenCart",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "OpenCart plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "OpenCart",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "PrestaShop",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "PrestaShop plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "PrestaShop",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Salesforce Commerce Cloud",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Salesforce Commerce Cloud plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Salesforce Commerce Cloud",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Shopify",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Shopify plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Shopify",
+      "Voucher Tracking implemented": "Yes",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Shoplazza",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Shoplazza plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Shoplazza",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Shopware 5",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Shopware 5 plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Shopware",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Shopware 6",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Shopware 6 plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Shopware",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Squarespace",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Squarespace plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Squarespace",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
+  },
+  {
+    "name": "Wix",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "Wix plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Wix",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "No"
+    }
+  },
+  {
+    "name": "WooCommerce",
+    "values": {
+      "Deduplication Solution": "Other",
+      "Other Deduplication Solution": "WooCommerce plugin",
+      "Tag Management Solution": "Other",
+      "eCommerce platform": "Wordpress (WooCommerce)",
+      "Voucher Tracking implemented": "Unknown",
+      "Product Level Tracking implemented": "Yes"
+    }
   }
 ];

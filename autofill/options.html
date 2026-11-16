@@ -47,6 +47,12 @@
   <p class="muted">Choose what each Technical Checklist field is filled with. Anything left on <strong>Team default</strong> follows the agreed team rules. These settings are yours alone. They follow your Edge profile and change nothing in Salesforce until you next click Fill.</p>
 
   <section class="card">
+    <h2>Platform detection</h2>
+    <p class="muted">When the panel's template is set to <strong>Auto-detect platform</strong>, Fill reads the client's site from the record's <strong>Landing Page URL</strong> to work out its eCommerce platform, then applies that platform's template. Reading other websites needs your permission, asked for once here. Without it, the default fill is used.</p>
+    <p><span id="detect-status" class="muted">Checking…</span> <button id="detect-toggle" type="button" hidden></button></p>
+  </section>
+
+  <section class="card">
     <h2>Date format</h2>
     <p class="muted">How dates are typed into Salesforce. Use the order Salesforce shows dates in for you.</p>
     <label class="inline">Format <select id="date-format"></select></label>

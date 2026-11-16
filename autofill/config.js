@@ -3,7 +3,7 @@
 // ones follow Moonfill (github.com/OptimusRodier/moonfill), which fills fields on awin.lightning.force.com,
 // but the Technical Checklist itself is unverified. Use the panel's "Check page" report to correct them.
 globalThis.TCA_CONFIG = {
-  version: '0.5.0',
+  version: '0.6.0',
   checklistTitle: 'Technical Checklist',
 
   // Date fields (Pixel Sent, Successful Tracking Test) are typed in this format, as a user would type
@@ -15,6 +15,27 @@ globalThis.TCA_CONFIG = {
   history: {
     title: 'Implementation History',      // box title; a count such as "(6)" or "(10+)" after it is fine
     createdText: ['Created.', 'Created']  // text of the cell that marks the creation line
+  },
+
+  // Platform detection: the client's site comes from this record field, and its page (HTML plus
+  // response headers) is searched for each platform's signs. The platform with the most matching
+  // signs wins; a tie, or no match, means "no platform detected" and the default fill is used.
+  // Signs are best guesses: correct them here when a site is detected wrongly.
+  landingPageLabel: 'Landing Page URL',
+  platformSigns: {
+    'BigCommerce': [/cdn\d*\.bigcommerce\.com/i, /mybigcommerce\.com/i, /stencil-utils/i, /\bBCData\b/],
+    'Lightspeed': [/webshopapp\.com/i, /shoplightspeed\.com/i, /lightspeedhq/i, /\bseoshop\b/i],
+    'Magento': [/text\/x-magento-init/i, /\bMagento_[A-Z]/, /mage\/cookies/i, /\/static\/version\d+\/frontend\//i],
+    'OpenCart': [/index\.php\?route=(common|product|checkout|account)\//i, /catalog\/view\/(theme|javascript)\//i, /\bOpenCart\b/i],
+    'PrestaShop': [/var prestashop\s*=/i, /\/modules\/ps_[a-z]/i, /\bprestashop\b/i],
+    'Salesforce Commerce Cloud': [/\/on\/demandware\.(store|static)\//i, /\bdemandware\b/i, /dwanalytics/i, /\/dw\/shop\//i],
+    'Shopify': [/cdn\.shopify\.com/i, /\bShopify\.theme\b/, /\bShopify\.shop\s*=/, /myshopify\.com/i, /shopify-digital-wallet/i],
+    'Shoplazza': [/shoplazza\.com/i, /\bshoplazza\b/i, /\bSHOPLAZZA\b/],
+    'Shopware 5': [/\/themes\/Frontend\//i, /\/web\/cache\/\d+_/i, /\bStateManager\b/, /jQuery\.publish/],
+    'Shopware 6': [/\/bundles\/storefront\//i, /window\.router\s*=/, /frontend\.checkout\./i, /\/theme\/[0-9a-f]{32}\//i],
+    'Squarespace': [/static1\.squarespace\.com/i, /Static\.SQUARESPACE_CONTEXT/, /squarespace-cdn\.com/i, /\bsquarespace\b/i],
+    'Wix': [/static\.wixstatic\.com/i, /parastorage\.com/i, /x-wix-request-id/i, /wixsite\.com/i, /\bwix-bolt\b/i],
+    'WooCommerce': [/wp-content\/plugins\/woocommerce\//i, /woocommerce-no-js/i, /\bwc-block-/i, /woocommerce_params|wc_add_to_cart_params/]
   },
 
   selectors: {

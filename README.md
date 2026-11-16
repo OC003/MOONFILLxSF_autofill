@@ -65,13 +65,21 @@ Each run fills **30 of the checklist's 45 fields**:
 
 The other 15 fields, such as Tech notes, are left untouched. If the Implementation History box or its Created. line can't be found, Pixel Sent is left as it is and the panel says why. Everything else is still filled and saved.
 
+**Platform templates.** Thirteen eCommerce platforms have their own answers for six fields: Deduplication Solution, Other Deduplication Solution, Tag Management Solution, eCommerce platform, Voucher Tracking implemented and Product Level Tracking implemented. The panel's **Template** menu offers:
+
+- **Auto-detect platform** (the default). When you click Fill, Moonfill reads the client's site from the record's **Landing Page URL**, works out the platform from signs in the page, and applies that platform's template. It first downloads the page invisibly. If that's blocked or inconclusive, it opens the site briefly in a background tab, then closes it.
+- **A platform by name**, to skip detection: BigCommerce, Lightspeed, Magento, OpenCart, PrestaShop, Salesforce Commerce Cloud, Shopify, Shoplazza, Shopware 5, Shopware 6, Squarespace, Wix, WooCommerce.
+- **Default (no template).**
+
+Template values only fill **empty** fields, so an answer that's already there is kept. If there's no Landing Page URL, no platform is recognised, or the signs point to two platforms, the default fill is used and the panel says why. Detection needs permission to read websites, which you grant once in Settings (**Allow platform detection**). Until then, the default fill is used.
+
 **Settings.** For every checklist field you can choose:
 - **Team default** (the agreed answer)
 - **Leave untouched**
 - **Fill with…**, a value of your own
 - **Record creation date** or **Today's date**, for the two date fields only
 
-You can also choose the date format (DD/MM/YYYY or MM/DD/YYYY) and reset everything to the team defaults. Settings are yours alone. They follow your Edge or Chrome profile and take effect on your next click. You can also open them from the extensions page: Moonfill → **Details** → **Extension options**.
+You can also allow or turn off platform detection, choose the date format (DD/MM/YYYY or MM/DD/YYYY) and reset everything to the team defaults. Your own choices win over templates. Settings are yours alone. They follow your Edge or Chrome profile and take effect on your next click. You can also open them from the extensions page: Moonfill → **Details** → **Extension options**.
 
 ### Fields filled by both
 
@@ -162,6 +170,8 @@ Moonfill is not in the browser store yet, so it is installed from the folder you
 | The record is already in edit mode | Save or cancel your own edits, then click again. |
 | "…" changed unexpectedly, so nothing was saved | Something else changed while filling, such as a dependent field, or a scan filling the record at the same time. Click **Cancel**, wait a moment and try again. |
 | Option "…" is not available | That dropdown doesn't have the value. If you set it in Settings, correct it there. Otherwise tell the project owner. Nothing was saved; click **Cancel**. |
+| No template: platform detection isn't allowed yet | Open **Settings** and click **Allow platform detection**, or pick the platform in the **Template** menu. |
+| No template: no platform signs found / signs of both… | The site's platform couldn't be told for sure. Pick it in the **Template** menu and click again, or keep the default fill. |
 | Pixel Sent left as it is: no "Implementation History" box… | If the history box is on the **Related** tab, open that tab once, go back to Details and click again. |
 | Saved, but … don't show the expected value | Check those fields on the record. Salesforce may have changed them on save. |
 
@@ -173,7 +183,7 @@ When you report a problem, please send a screenshot of the Moonfill card or the 
 
 - The result posted in Chatter is the same text as the Teams message, without your name and job title.
 - The Teams message is still sent, so you always have a copy.
-- Moonfill only talks to Microsoft Forms, the Moonpull results folder and Salesforce, using your own logins. It stores the scan list on your computer only. Your checklist settings are kept in your browser profile, and follow it to your other devices if browser sync is on. The checklist itself makes no network requests at all: it works on the page in front of you.
+- Moonfill only talks to Microsoft Forms, the Moonpull results folder and Salesforce, using your own logins. It stores the scan list on your computer only. Your checklist settings are kept in your browser profile, and follow it to your other devices if browser sync is on. The checklist works on the page in front of you. Its only network request is platform detection: when you click Fill with Auto-detect on, it reads the client's public site (the record's Landing Page URL) without your cookies. It sends nothing anywhere, and it only works once you've allowed it in Settings.
 - Moonfill is for scans started from a Salesforce record. There is no manual MID box anymore.
 - The checklist only changes the **Technical Checklist**. Other checklists and fields on the record are compared before and after, and never saved by it.
 
@@ -201,6 +211,7 @@ Scans built by Rodier for Awin agents. The Technical Checklist comes from Salesf
 - One-click fill and save of the Technical Checklist (30 fields), with **Check page** and **Fill only**.
 - Pixel Sent from the record's creation date, and Successful Tracking Test from today's date.
 - Personal **Settings** for every checklist field.
+- **Platform templates** for 13 eCommerce platforms, picked by hand or detected from the client's site.
 
 **v2.1**
 - **Fills Salesforce fields from the result**, silently, right after the result is pasted: Moonpull Status, Consent Signals, Transparency & Consent Framework Plugin, AASAF and Consent Management Platform are set (existing values replaced) and saved. No setting; the notification only mentions fields that need a look.

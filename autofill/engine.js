@@ -332,6 +332,37 @@
     return el ? cleanText(el, cfg.selectors.labelNoise) : null;
   }
 
+  // A web address as typed in Salesforce ("shop.example.com", "https://…"), or null.
+  function webAddress(text) {
+    let t = String(text ?? '').trim().split(/\s+/)[0] || '';
+    if (!t) return null;
+    if (!/^https?:\/\//i.test(t)) t = 'https://' + t;
+    try {
+      const url = new URL(t);
+      return /^https?:$/.test(url.protocol) && url.hostname.includes('.') ? url.href : null;
+    } catch { return null; }
+  }
+
+  // The client's site from the record's Landing Page URL field: { url } or { reason }. Read outside
+  // edit mode, from the active record only; a link's address is preferred over its displayed text.
+  function landingPageUrl(doc, cfg) {
+    const S = cfg.selectors;
+    const want = norm(cfg.landingPageLabel);
+    const items = [];
+    for (const labelEl of all(activeRoot(doc, cfg), S.label)) {
+      if (norm(cleanText(labelEl, S.labelNoise)) !== want) continue;
+      let item = null;
+      for (const sel of S.item) { item = closest(labelEl, sel); if (item) break; }
+      if (item && !items.includes(item)) items.push(item);
+    }
+    for (const item of items) {
+      const href = all(item, 'a[href]').map(a => a.getAttribute('href')).find(h => /^https?:\/\//i.test(h));
+      const url = webAddress(href || viewValue(item, cfg));
+      if (url) return { url };
+    }
+    return { reason: items.length ? `"${cfg.landingPageLabel}" is empty or isn't a web address` : `no "${cfg.landingPageLabel}" field found on this record` };
+  }
+
   // ---------- Fill (and optionally save) ----------
 
   // opts.mode: 'save' (default) clicks Salesforce's Save; 'fill' stops before Save.
@@ -481,6 +512,8 @@
 
     const created = createdDate(doc, cfg);
     lines.push(`${cfg.history.title}: ${created.date ? 'creation date found' : `✗ ${created.reason}`}`);
+    const site = landingPageUrl(doc, cfg);
+    lines.push(`${cfg.landingPageLabel}: ${site.url ? 'found' : `✗ ${site.reason}`} · template: ${opts.template || 'auto-detect (runs on Fill)'}`);
 
     const { targets } = planTargets(fields);
     lines.push(`Fields to fill (${targets.length}):`);
@@ -516,5 +549,5 @@
     return lines.join('\n');
   }
 
-  root.TCAEngine = { planTargets, findChecklist, fieldItems, run, checkPage, isEditing, all, parseDate, formatDate, createdDate, todayIso };
+  root.TCAEngine = { planTargets, findChecklist, fieldItems, run, checkPage, isEditing, all, parseDate, formatDate, createdDate, todayIso, landingPageUrl };
 })(globalThis);
