@@ -31,15 +31,17 @@ Moonfill's `background.js` gains one line at the end: `importScripts("autofill/b
 | `usage.html`, `usage-page.js` | The usage dashboard (not linked from the panel or Settings) |
 | `background.js` | Reads a client's site for detection: invisible fetch without cookies, or an inactive tab that is always closed afterwards. Loaded by Moonfill's `background.js` |
 | `options.html`, `options.js` | The settings page |
-| `setup/page.js` | Programme setup, stage 1: the read-only **Check page** panel on ui.awin.com, which reports each page's controls, options and buttons (never values; long numbers and emails masked). Uses the engine's shared DOM helpers (`TCAEngine.dom`) |
+| `setup/form.js` | The setup form on the Salesforce record. It catches Moonfill's 🚀 click in the capture phase, so `salesforce.js` is unchanged |
+| `setup/fill.js` | Fills and saves one Awin setup page: the 10 page recipes, matched by URL. Fields are found by id where the page check showed one, otherwise by their visible label or option text |
+| `setup/background.js` | The run: opens Moonfill's `NI_URLS` pages and works through them one at a time (fill → save → wait for reload → check). It retries Pre-join publishers, then marks tabs and notifies |
 | `dev/field-specification.json` | The agreed field decisions (source of `fields.js`) |
-| `dev/mock/` | Fictional record pages, and an Awin-style settings page (`awin-setup.html`), for testing. To use them in Edge, turn on **Allow access to file URLs** for the extension |
+| `dev/mock/` | Fictional record pages for testing. To use them in Edge, turn on **Allow access to file URLs** for the extension |
 | `dev/tests/` | Tests run against the mock pages with jsdom |
 
 ```sh
 cd autofill/dev
 npm ci
-npm test        # 64 tests
+npm test        # 80 tests
 npm run generate  # after editing dev/field-specification.json
 npm run check   # syntax check of autofill/*.js
 ```
@@ -61,6 +63,26 @@ git merge upstream/dev
 4. **Filling.** The template's values are layered onto the team defaults, filling empty fields only, and personal settings are applied on top.
 
 The signs were checked against live public shops for Shopify, WooCommerce, BigCommerce, Squarespace and Wix (2026-11-16). For the other platforms they are unverified best guesses, so correct them in `config.js` if a site is detected wrongly.
+
+## Programme setup
+
+**Flow:**
+1. The 🚀 click is caught on the record, and `setup/form.js` shows the form.
+2. **Run setup** sends `tcaSetupRun {mid, values, save}` to the worker.
+3. `setup/background.js` opens the pages and, for each one:
+   - sends `tcaSetupFill`. The page answers `skipped`, `filled`, `failed`, or `saving`: it answers first, then clicks Save, because a classic form reloads the page.
+   - after `saving`, waits for a reload (or 4 s), then sends `tcaSetupVerify`. The page checks its values again and looks for an error message.
+
+**Rules:**
+- Tick boxes are only ever ticked, never toggled, so a rerun can't untick them.
+- A field that can't be found stops that page before Save, with a short description of the page (controls, dropdowns, frames).
+- Only Pre-join publishers is retried: up to 5 times, 3 s apart.
+
+**Not yet verified on the live pages:**
+- Commission groups, Plugin store and Tracking tag settings: the page check (a temporary panel, since removed) couldn't see their fields, so they're found by text at run time. If they sit inside a frame from another site, the run reports it, and the content script will need that frame's host.
+- Pre-join publishers' exact layout, error and confirmation messages, and whether a Save reloads each page.
+- First runs: **Save each page** off, on a test advertiser.
+- The run isn't resumed if the browser closes the worker mid-run.
 
 ## Usage reporting
 

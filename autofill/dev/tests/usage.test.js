@@ -126,7 +126,7 @@ test('background: while SharePoint is not set up, uses wait in this browser sile
   const w = worker();
   assert.deepEqual(plain(await w.send({action: 'tcaUsage', event: {tool: 'Checklist', action: 'fill-save', outcome: 'success', tc: 'Jane Smith'}})), {ok: true});
   assert.equal(w.store.tcaUsageQueue.length, 1);
-  assert.equal(w.store.tcaUsageQueue[0].Version, '0.7.0');
+  assert.equal(w.store.tcaUsageQueue[0].Version, '0.8.0');
   assert.equal(w.fetched.length, 0);
   const status = await w.context.TCAUsageWorker.status();
   assert.equal(status.configured, false);

@@ -13,7 +13,11 @@
   const effective = template => settings.apply(T.applyTemplate(teamFields, template), teamCfg, saved);
   let { fields, cfg, changed: personal } = effective(null);
   const refresh = async () => { saved = await settings.load(); ({ fields, cfg, changed: personal } = effective(null)); };
+  // The "Clear checklist" preset: every field Fill would fill, emptied (dropdowns set to --None--).
+  const clearing = () => state.template === 'clear';
+  const clearFields = () => engine.planTargets(fields).targets.map(f => ({ label: f.label, excluded: false, value: '', clear: true }));
   const summary = () => {
+    if (clearing()) return `Clears ${clearFields().length} fields: everything Fill fills, including the dates. v${cfg.version}`;
     const targets = engine.planTargets(fields).targets;
     return `Fills ${targets.length} fields: ${targets.filter(f => !f.rule).length} values and ${targets.filter(f => f.rule).length} dates. ` +
       (personal ? `Your settings: ${personal} change(s) from the team defaults.` : 'Team defaults.') + ` v${cfg.version}`;
@@ -60,6 +64,7 @@
       <option value="auto">Auto-detect platform</option>
       <option value="none">Default (no template)</option>
       ${templates.map(t => `<option value="${t.name}">${t.name}</option>`).join('')}
+      <option value="clear">Clear checklist</option>
     </select></label></div>
     <div class="note summary"></div>
     <div class="row">
@@ -112,7 +117,7 @@
   // The template for this run: the one picked in the panel, or the detected platform's.
   // Anything unclear means no template (the default fill), with a note saying why.
   async function chooseTemplate(notes) {
-    if (state.template === 'none') return null;
+    if (state.template === 'none' || clearing()) return null;
     if (state.template !== 'auto') return templates.find(t => t.name === state.template) || null;
     const site = engine.landingPageUrl(document, cfg);
     if (!site.url) { notes.push(`No template: ${site.reason}, so the default fill was used.`); return null; }
@@ -132,6 +137,7 @@
 
   async function act(mode) {
     if (state.running) return;
+    if (clearing() && mode === 'save' && !window.confirm(`Clear ${clearFields().length} Technical Checklist fields and save the record?`)) return;
     Object.assign(state, { running: true, status: 'running', message: mode === 'save' ? 'Filling and saving…' : 'Filling…', report: '' });
     paint();
     let result;
@@ -142,7 +148,8 @@
       if (template && state.template !== 'auto') notes.push(`${template.name} template applied.`);
       say(mode === 'save' ? 'Filling and saving…' : 'Filling…');
       const run = effective(template);
-      result = await engine.run(document, run.cfg, run.fields, { mode });
+      if (clearing()) notes.push('Clear checklist:');
+      result = await engine.run(document, run.cfg, clearing() ? clearFields() : run.fields, { mode });
     } catch (error) {
       result = { status: 'failed', message: `Unexpected error: ${error.message}` };
     }
@@ -191,7 +198,7 @@
 
   $('.head').addEventListener('click', () => { state.expanded = !state.expanded; paint(); });
   $('.check').addEventListener('click', check);
-  $('.template').addEventListener('change', e => { state.template = e.target.value; });
+  $('.template').addEventListener('change', e => { state.template = e.target.value; paint(); });
   $('.fill').addEventListener('click', () => act('fill'));
   $('.save').addEventListener('click', () => act('save'));
   // Opened directly: the settings page is web-accessible on Salesforce only.

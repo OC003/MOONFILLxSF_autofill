@@ -37,12 +37,12 @@
     },
     {
       "matches": ["https://awin.lightning.force.com/*", "file:///*/autofill/dev/mock/*.html*"],
-      "js": ["autofill/fields.js", "autofill/config.js", "autofill/settings.js", "autofill/templates.js", "autofill/engine.js", "autofill/content.js"],
+      "js": ["autofill/fields.js", "autofill/config.js", "autofill/settings.js", "autofill/templates.js", "autofill/engine.js", "autofill/content.js", "autofill/setup/form.js"],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://ui.awin.com/*", "file:///*/autofill/dev/mock/awin-*.html*"],
-      "js": ["autofill/config.js", "autofill/engine.js", "autofill/setup/page.js"],
+      "matches": ["https://ui.awin.com/*"],
+      "js": ["autofill/config.js", "autofill/engine.js", "autofill/setup/fill.js"],
       "run_at": "document_idle"
     }
   ],

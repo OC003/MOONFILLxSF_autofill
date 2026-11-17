@@ -6,7 +6,7 @@
 // While config.usage.site is empty, records wait in this browser and nothing is sent anywhere.
 (function (root) {
   const TOOLS = ['Checklist', 'Moonpull scan', 'New Implementation', 'IR'];
-  const ACTIONS = ['fill', 'fill-save', 'scan', 'open-tabs'];
+  const ACTIONS = ['fill', 'fill-save', 'scan', 'open-tabs', 'setup'];
   const OUTCOMES = ['success', 'failed'];
   const ROW = ['When', 'AssignedTC', 'Tool', 'Action', 'Outcome', 'Reason', 'Version'];
 
@@ -42,9 +42,10 @@
     'scan-timeout': 'No scan result in time',
     'scan-mismatch': 'Scan result was for another advertiser',
     'scan-interrupted': 'Posting the scan result was interrupted',
-    'tabs-failed': "Tabs couldn't be opened"
+    'tabs-failed': "Tabs couldn't be opened",
+    'setup-page-failed': 'A setup page needed a look'
   };
-  const CODES = new Set(['unconfirmed', 'tabs-failed', 'other', ...REASONS.map(([code]) => code)]);
+  const CODES = new Set(['unconfirmed', 'tabs-failed', 'setup-page-failed', 'other', ...REASONS.map(([code]) => code)]);
 
   function reasonCode(reason) {
     const text = String(reason ?? '').trim();

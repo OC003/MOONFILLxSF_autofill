@@ -74,3 +74,11 @@ try {
 } catch (error) {
   console.error('Moonfill usage reporting failed to start', error);
 }
+
+// Programme setup (setup/background.js): fills and saves the New Implementation pages one by one.
+try {
+  if (typeof importScripts === 'function') importScripts('autofill/setup/background.js');
+} catch (error) {
+  console.error('Moonfill programme setup failed to start', error);
+}
+

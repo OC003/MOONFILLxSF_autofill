@@ -1,0 +1,329 @@
+// Programme setup, stage 3 (page side): fills one Awin UI setup page from the values entered in the
+// setup form, then saves it. Driven by the background script, one page at a time:
+//   { action: 'tcaSetupFill', values, save }  →  { status: 'skipped' | 'filled' | 'saving' | 'failed', message }
+//   { action: 'tcaSetupVerify', values }       →  { status: 'saved' | 'unconfirmed' | 'failed', message }
+// Fields are found by their id where the page check showed a stable one, otherwise by their visible
+// text (label or option), so pages whose structure the check couldn't see still work.
+(function (root) {
+  const { all, cleanText, visible, closest, norm, setNative, clickLikeUser, waitFor, sleep } = root.TCAEngine.dom;
+  const NOISE = '.sr-only, .visually-hidden, script, style, svg';
+  const CONTROL = 'input:not([type="hidden"]), select, textarea, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="checkbox"], [role="switch"]';
+  const TRIGGER = '.ng-select, mat-select, .mat-select, .mat-mdc-select, .select2-container, .chosen-container, .p-dropdown, [role="combobox"], [aria-haspopup="listbox"], select';
+  const OPTION = '[role="option"], .ng-option, mat-option, .mat-option, .mat-mdc-option, .select2-results__option, .dropdown-item, .p-dropdown-item, li';
+  const ERROR = '.alert-danger, .alert-error, .error-message, .toast-error, .notification-error, [role="alert"].error';
+  const SUCCESS = '.alert-success, .toast-success, .notification-success';
+
+  class SetupError extends Error {}
+  const fail = message => { throw new SetupError(message); };
+
+  const PLATFORM_APPEND = {
+    Access: 'source=aw',
+    other: 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!'
+  };
+  const PLUGIN = { name: 'R.O.EYE - Consent - SingleView', code: 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};' };
+  const PUBLISHERS = ['45628', '111'];
+
+  // ---------- finding things ----------
+
+  const doc = () => root.document;
+  const shown = selector => all(doc().body, selector).filter(visible).filter(el => !closest(el, '#tca-setup-root'));
+  const same = (a, b) => norm(a).replace(/[:?]$/, '') === norm(b).replace(/[:?]$/, '');
+  // Awin's account switcher ("Provider Area", Go To Advertiser Account, Submit) is on every page.
+  const inSwitcher = el => !!(closest(el, 'form') && closest(el, 'form').querySelector('[name="switchId"]'));
+  const byId = id => { const el = doc().getElementById(id); return el && visible(el) ? el : null; };
+
+  // The smallest visible element whose own text is exactly this label.
+  function labelElement(text) {
+    const hits = shown('label, span, div, p, td, th, dt, h3, h4, h5, legend, strong, b').filter(el => same(cleanText(el, NOISE), text));
+    return hits.find(el => !hits.some(other => other !== el && el.contains(other))) || null;
+  }
+
+  // The first control after a label: its "for" target, or the next matching element in page order
+  // within the label's surroundings (up to four levels up).
+  function controlAfter(label, selector) {
+    if (label.tagName === 'LABEL' && label.htmlFor) { const t = doc().getElementById(label.htmlFor); if (t && t.matches(selector)) return t; }
+    const inside = all(label, selector).filter(visible)[0];
+    if (inside) return inside;
+    for (let n = label, depth = 0; n && depth < 4; n = n.parentElement, depth++) {
+      const after = all(n.parentElement || n, selector).filter(visible).find(el => label.compareDocumentPosition(el) & 4);
+      if (after) return after;
+    }
+    return null;
+  }
+
+  function fieldByLabel(text, selector = CONTROL) {
+    const native = shown('input, select, textarea').find(el => el.labels && [...el.labels].some(l => same(cleanText(l, NOISE), text)));
+    if (native && native.matches(selector)) return native;
+    const label = labelElement(text);
+    return label ? controlAfter(label, selector) : null;
+  }
+
+  // ---------- changing things (each one checks it worked) ----------
+
+  async function setText(el, value, name) {
+    if (!el) fail(`"${name}" not found on the page.`);
+    if (el.disabled || el.readOnly) fail(`"${name}" can't be edited.`);
+    if (el.isContentEditable) {
+      el.focus();
+      doc().execCommand('selectAll', false, null);
+      doc().execCommand('insertText', false, value);
+    } else {
+      setNative(el, value);
+    }
+    const now = el.isContentEditable ? el.textContent : el.value;
+    if (now.trim() !== String(value).trim()) fail(`"${name}" didn't keep its new value.`);
+  }
+
+  function ensureChecked(el, name) {
+    if (!el) fail(`"${name}" not found on the page.`);
+    if (el.disabled) fail(`"${name}" can't be changed.`);
+    if (!el.checked) clickLikeUser(el);
+    if (!el.checked) fail(`"${name}" didn't stay ticked.`);
+  }
+
+  // A radio button whose label starts with the option's text.
+  function chooseRadio(groupName, option) {
+    const radios = [...doc().querySelectorAll(`input[type="radio"][name="${groupName}"]`)];
+    if (!radios.length) fail(`The "${option}" choice wasn't found on the page.`);
+    const radio = radios.find(r => [...(r.labels || [])].some(l => norm(cleanText(l, NOISE)).startsWith(norm(option))));
+    if (!radio) fail(`Option "${option}" isn't available.`);
+    if (!radio.checked) clickLikeUser(radio);
+    if (!radio.checked) fail(`"${option}" didn't stay selected.`);
+  }
+
+  function chooseNative(select, option, name) {
+    const match = [...select.options].find(o => same(o.text, option));
+    if (!match) fail(`"${name}": option "${option}" isn't available. Options shown: ${[...select.options].map(o => o.text.trim()).filter(Boolean).join(', ')}.`);
+    setNative(select, match.value);
+    if (select.value !== match.value) fail(`"${name}" didn't keep "${option}".`);
+  }
+
+  // A dropdown: native, or built from plain elements (click it open, then click the option's text).
+  async function choose(trigger, option, name) {
+    if (!trigger) fail(`"${name}" not found on the page.`);
+    if (trigger.tagName === 'SELECT') return chooseNative(trigger, option, name);
+    const opened = async () => waitFor(() => shown(OPTION).find(o => same(cleanText(o, NOISE), option)), 3000);
+    let item = null;
+    for (let attempt = 0; attempt < 2 && !item; attempt++) {   // the first click is sometimes swallowed
+      clickLikeUser(all(trigger, 'input')[0] || trigger);
+      item = await opened();
+    }
+    if (!item) fail(`"${name}": option "${option}" didn't appear when the dropdown was opened.`);
+    clickLikeUser(item);
+    await sleep(200);
+    if (!norm(cleanText(trigger, NOISE)).includes(norm(option)) && !(trigger.value && same(trigger.value, option))) {
+      fail(`"${name}" doesn't show "${option}" after choosing it.`);
+    }
+  }
+
+  // The dropdown, anywhere on the page, that offers this option.
+  async function chooseAnywhere(option, name) {
+    const select = shown('select').find(s => [...s.options].some(o => same(o.text, option)));
+    if (select) return chooseNative(select, option, name);
+    for (const trigger of shown(TRIGGER)) {
+      try { await choose(trigger, option, name); return; } catch { doc().body.click(); /* close it and try the next one */ }
+    }
+    fail(`No dropdown on the page offers "${option}".`);
+  }
+
+  function button(texts, scope = doc().body) {
+    const wanted = [].concat(texts).map(norm);
+    return all(scope, 'button, input[type="submit"], input[type="button"], a.btn, a.button, [role="button"]').filter(visible)
+      .filter(b => !closest(b, '#tca-setup-root') && !inSwitcher(b))
+      .find(b => wanted.includes(norm(cleanText(b, NOISE) || b.value))) || null;
+  }
+
+  async function clickSave(el, name) {
+    if (!el) fail(`The ${name} button wasn't found.`);
+    if (el.disabled || el.classList.contains('btn-disabled')) {
+      await waitFor(() => !el.disabled && !el.classList.contains('btn-disabled'), 2000);
+      if (el.disabled) fail(`The ${name} button stayed disabled: the page didn't register the changes.`);
+    }
+    // Answer first: a classic form reloads the page as soon as it's submitted.
+    setTimeout(() => clickLikeUser(el), 100);
+    return { status: 'saving', message: `${name} clicked.` };
+  }
+
+  const errorShown = () => shown(ERROR).map(e => cleanText(e, NOISE)).find(Boolean);
+  const successShown = () => shown(SUCCESS).map(e => cleanText(e, NOISE)).find(Boolean);
+
+  // ---------- the pages, in the order New Implementation opens them ----------
+
+  const append = v => (v.platformOffer === 'Access' ? PLATFORM_APPEND.Access : PLATFORM_APPEND.other);
+
+  const PAGES = [
+    {
+      key: 'tracking', name: 'Tracking settings', match: /\/tracking-settings\/.*\/main-settings/,
+      async fill(v) {
+        const fields = { MainWebsiteURL: ['Website URL', v.websiteUrl], GlobalClickThroughPage: ['Landing Page', v.landingPage], ClickAppend: ['Default Query String Append', append(v)] };
+        const found = Object.fromEntries(Object.keys(fields).map(id => [id, byId(id)]));
+        for (const [id, [name]] of Object.entries(fields)) if (!found[id]) fail(`"${name}" not found on the page.`);
+        for (const id of ['DeeplinkEnabled', 'NoDomainDeeplink']) if (!byId(id)) fail(`"${id}" tick box not found on the page.`);
+        for (const [id, [name, value]] of Object.entries(fields)) await setText(found[id], value, name);
+        ensureChecked(byId('DeeplinkEnabled'), 'Enable Link Builder for publishers');
+        ensureChecked(byId('NoDomainDeeplink'), 'Use relative URLs for deep links');
+      },
+      save: () => button('Save'),
+      verify: v => [byId('MainWebsiteURL')?.value === v.websiteUrl, byId('GlobalClickThroughPage')?.value === v.landingPage, byId('ClickAppend')?.value === append(v), byId('DeeplinkEnabled')?.checked, byId('NoDomainDeeplink')?.checked]
+    },
+    { key: 'invite', name: 'Invite user', match: /\/settings\/invite-user/, skip: () => 'comes pre-filled' },
+    {
+      key: 'commission', name: 'Commission groups', match: /\/commission-manager\/.*\/commission-groups/,
+      async fill(v) {
+        if (!labelElement('Transaction Type')) {
+          const edit = button('Edit Commission Groups');
+          if (edit) { clickLikeUser(edit); await waitFor(() => labelElement('Transaction Type'), 5000); }
+        }
+        if (!labelElement('Transaction Type')) fail('"Transaction Type" not found on the page, even after clicking Edit Commission Groups.');
+        await choose(fieldByLabel('Transaction Type', TRIGGER), v.transactionType, 'Transaction Type');
+        await choose(fieldByLabel('Commission Type', TRIGGER), v.commissionType, 'Commission Type');
+        await setText(fieldByLabel('Publisher Commission', 'input:not([type="hidden"]), [contenteditable="true"]'), v.publisherCommission, 'Publisher commission');
+      },
+      save: () => button(['Save', 'Save changes', 'Update', 'Confirm'])
+    },
+    {
+      key: 'plugin', name: 'Plugin store', match: /\/advertiser-mastertag\/.*\/plugins/,
+      skip: v => (v.platformOffer === 'Access' ? 'not needed for Access' : null),
+      async fill() {
+        const stay = button('Stay here for now');
+        if (stay) { clickLikeUser(stay); await sleep(500); }
+        const add = button('Add Plugin');
+        if (!add) fail('The Add Plugin button wasn\'t found.');
+        clickLikeUser(add);
+        await waitFor(() => shown(TRIGGER).length || shown('textarea, [contenteditable="true"]').length, 5000);
+        await chooseAnywhere(PLUGIN.name, 'Plugin');
+        const box = await waitFor(() => shown('textarea, [contenteditable="true"], input[type="text"]').filter(el => !inSwitcher(el)).pop(), 3000);
+        await setText(box, PLUGIN.code, 'Plugin code');
+      },
+      save: () => {
+        const box = shown('textarea, [contenteditable="true"]').pop();
+        const scope = (box && closest(box, '[role="dialog"], .modal, .modal-content, form, .panel, .card')) || doc().body;
+        return button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], scope);
+      }
+    },
+    {
+      key: 'tag', name: 'Tracking tag settings', match: /\/advertiser-mastertag\/.*\/trackingtagsettings/,
+      async fill() {
+        await waitFor(() => shown(TRIGGER).length, 8000);
+        await chooseAnywhere('Conversion Tag and Image Pixel integrated', 'Tracking tag');
+      },
+      save: () => button(['Save', 'Save changes', 'Update'])
+    },
+    {
+      key: 'account', name: 'Account details', match: /\/merchant-settings\/.*\/account-details/,
+      async fill() {
+        for (const id of ['ipTrackingEnabled', 'referer_truncation_isDomainIncludeInvalid']) if (!byId(id)) fail(`"${id}" tick box not found on the page.`);
+        ensureChecked(byId('ipTrackingEnabled'), 'Enable IP tracking');
+        ensureChecked(byId('referer_truncation_isDomainIncludeInvalid'), 'Strip path information if referrer has no valid domain');
+      },
+      save: () => byId('tracking-masterdata-submit'),
+      verify: () => [byId('ipTrackingEnabled')?.checked, byId('referer_truncation_isDomainIncludeInvalid')?.checked]
+    },
+    { key: 'fee', name: 'Fee manager', match: /\/finance\/fee-manager\//, skip: () => 'comes pre-filled' },
+    {
+      key: 'mobile', name: 'Mobile tracking', match: /\/merchant-settings\/.*\/mobile-tracking/,
+      async fill() { chooseRadio('strategy', 'Tracking is implemented on mobile site'); },
+      save: () => byId('updateChanges'),
+      verify: () => [[...doc().querySelectorAll('input[name="strategy"]')].some(r => r.checked && [...(r.labels || [])].some(l => norm(cleanText(l, NOISE)).startsWith(norm('Tracking is implemented on mobile site'))))]
+    },
+    {
+      key: 'advertiser', name: 'Advertiser settings', match: /\/provider\/migrated-advertiser-settings\//,
+      async fill(v) {
+        const approval = fieldByLabel('Approval of Publishers Joining', 'select');
+        const days = fieldByLabel('Validation Period Days', 'input');
+        if (!approval) fail('"Approval of Publishers Joining" not found on the page.');
+        if (!days) fail('"Validation Period Days" not found on the page.');
+        chooseNative(approval, v.approval, 'Approval of Publishers Joining');
+        await setText(days, v.validationDays, 'Validation Period Days');
+      },
+      save: () => byId('migrated_advertiser_settings_save') || button('Save'),
+      verify: v => {
+        const approval = fieldByLabel('Approval of Publishers Joining', 'select');
+        return [approval && same(approval.selectedOptions[0]?.text, v.approval), fieldByLabel('Validation Period Days', 'input')?.value === String(v.validationDays)];
+      }
+    },
+    {
+      key: 'prejoin', name: 'Pre-join publishers', match: /\/provider\/pre-join-publishers/,
+      async fill() {
+        const boxes = PUBLISHERS.map(id => [id, publisherBox(id)]);
+        const missing = boxes.filter(([, box]) => !box).map(([id]) => id);
+        if (missing.length === PUBLISHERS.length) return { status: 'unconfirmed', message: `Publishers ${PUBLISHERS.join(' and ')} have no tick box: they may already be pre-joined.` };
+        if (missing.length) fail(`Publisher ${missing.join(', ')} not found with a tick box.`);
+        for (const [id, box] of boxes) ensureChecked(box, `Publisher ${id}`);
+        return null;
+      },
+      save: () => {
+        const box = publisherBox(PUBLISHERS[0]) || publisherBox(PUBLISHERS[1]);
+        const form = box && closest(box, 'form');
+        return (form && [...form.querySelectorAll('button, input[type="submit"]')].find(b => visible(b) && norm(cleanText(b, NOISE) || b.value) === 'submit')) || null;
+      },
+      verify: () => [!PUBLISHERS.some(id => { const box = publisherBox(id); return box && !box.checked; })]
+    }
+  ];
+
+  // The tick box in the row (table row, list item…) whose cell shows exactly this publisher ID.
+  function publisherBox(id) {
+    for (const box of shown('input[type="checkbox"]')) {
+      if (box.value === id) return box;
+      const row = closest(box, 'tr, li, [role="row"], .row');
+      if (row && all(row, 'td, th, span, a, div, label').some(c => cleanText(c, NOISE) === id)) return box;
+    }
+    return null;
+  }
+
+  const pageFor = () => PAGES.find(p => p.match.test(root.location.pathname));
+
+  async function fillPage(values, save) {
+    const page = pageFor();
+    if (!page) return { status: 'failed', message: `This page isn't one of the setup pages (${root.location.pathname.replace(/\d{4,}/g, '#')}).` };
+    const why = page.skip && page.skip(values);
+    if (why) return { status: 'skipped', message: `Skipped: ${why}.`, page: page.key };
+    try {
+      const early = await page.fill(values);
+      if (early) return { ...early, page: page.key };
+      if (!save) return { status: 'filled', message: 'Filled, not saved: check it, then save it yourself.', page: page.key };
+      return { ...(await clickSave(page.save(), 'Save')), page: page.key };
+    } catch (error) {
+      return { status: 'failed', message: error instanceof SetupError ? error.message : `Unexpected error: ${error.message}`, page: page.key, diagnostics: diagnostics() };
+    }
+  }
+
+  async function verifyPage(values) {
+    const page = pageFor();
+    if (!page) return { status: 'failed', message: 'The page changed to something unexpected after saving.' };
+    await sleep(500);
+    const error = errorShown();
+    if (error) return { status: 'failed', message: `The page shows an error: ${error.slice(0, 200)}`, page: page.key };
+    const checks = page.verify ? page.verify(values) : [];
+    if (checks.length && checks.every(Boolean)) return { status: 'saved', message: 'Saved and checked.', page: page.key };
+    if (!checks.length && successShown()) return { status: 'saved', message: 'Saved.', page: page.key };
+    return { status: 'unconfirmed', message: checks.length ? 'Saved, but the page doesn\'t show every value afterwards: check it.' : 'Save was clicked; the page showed no confirmation: check it.', page: page.key };
+  }
+
+  // What the page looked like when a field couldn't be found: frames are the usual reason.
+  function diagnostics() {
+    const frames = [...doc().querySelectorAll('iframe')].map(f => {
+      let readable = false;
+      try { readable = !!(f.contentDocument && f.contentDocument.body); } catch { /* another site */ }
+      const r = f.getBoundingClientRect();
+      return `${readable ? 'readable' : 'not readable'} frame ${Math.round(r.width)}×${Math.round(r.height)}`;
+    });
+    return `${shown(CONTROL).length} visible controls, ${shown(TRIGGER).length} dropdowns; ${frames.length ? frames.join(', ') : 'no frames'}`;
+  }
+
+  // Marks the tab so the result is visible in the tab strip.
+  function mark(symbol) {
+    doc().title = `${symbol} ${doc().title.replace(/^[✓⚠⏭✎] /, '')}`;
+  }
+
+  root.TCASetupFill = { PAGES, PLATFORM_APPEND, PLUGIN, PUBLISHERS, fillPage, verifyPage, pageFor, mark };
+
+  if (root.top !== root || !root.chrome || !root.chrome.runtime || !root.chrome.runtime.onMessage) return;
+  root.chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message) return undefined;
+    if (message.action === 'tcaSetupFill') { fillPage(message.values, message.save).then(sendResponse); return true; }
+    if (message.action === 'tcaSetupVerify') { verifyPage(message.values).then(sendResponse); return true; }
+    if (message.action === 'tcaSetupMark') { mark(message.symbol); sendResponse({ ok: true }); return undefined; }
+    return undefined;
+  });
+})(globalThis);

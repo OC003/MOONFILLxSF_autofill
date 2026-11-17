@@ -130,7 +130,7 @@ test('manifest: Moonfill entries unchanged; autofill added as its own content sc
     {matches: ['https://forms.office.com/*', 'https://forms.cloud.microsoft/*'], js: ['content.js']},
     {matches: ['https://awin.lightning.force.com/*'], js: ['salesforce.js']}
   ]);
-  assert.deepEqual(manifest.content_scripts[2].js, ['fields.js', 'config.js', 'settings.js', 'templates.js', 'engine.js', 'content.js'].map(f => 'autofill/' + f));
+  assert.deepEqual(manifest.content_scripts[2].js, ['fields.js', 'config.js', 'settings.js', 'templates.js', 'engine.js', 'content.js', 'setup/form.js'].map(f => 'autofill/' + f));
   assert.deepEqual(manifest.optional_host_permissions, ['https://*/*', 'http://*/*'], 'reading client sites is optional, granted in Settings');
   assert.equal(manifest.host_permissions.length, 4, "Moonfill's own site access unchanged");
   assert.equal(manifest.background.service_worker, 'background.js');
@@ -522,7 +522,7 @@ test('template picker: a chosen platform is used without detection; "Default" us
   const chrome = withChrome(null, () => ({ok: true, status: 200, text: SITES.Shopify}));
   const window = await open('lightning', 'success', null, chrome);
   const picker = panel(window).querySelector('.template');
-  assert.equal(picker.options.length, 15, 'auto, default and 13 platforms');
+  assert.equal(picker.options.length, 16, 'auto, default, 13 platforms and Clear checklist');
   picker.value = 'Wix';
   picker.dispatchEvent(new window.Event('change'));
   let status = await press(window, 'save');
@@ -661,3 +661,40 @@ test('usage runs in the background: no Usage link on the panel, one plain line i
   assert.match(text, /counts each use .* by the record's Assigned TC, to measure adoption\. No client information is recorded\./);
   assert.equal(settings.document.querySelector('a[href="usage.html"]'), null, 'no link to the dashboard');
 });
+
+// ---------- Clear checklist preset ----------
+
+for (const mock of Object.keys(MOCKS)) {
+  test(`${mock}: "Clear checklist" empties every field Fill fills, dates included, and leaves the rest`, async () => {
+    const window = await open(mock);
+    await press(window, 'save');                       // fill it first
+    const ui = panel(window);
+    ui.querySelector('.template').value = 'clear';
+    ui.querySelector('.template').dispatchEvent(new window.Event('change'));
+    assert.match(ui.querySelector('.summary').textContent, /^Clears 30 fields/);
+    window.confirm = () => true;
+    const before = window.mockSaveCount;
+    const status = await press(window, 'save');
+    assert.equal(status.dataset.state, 'saved', status.textContent);
+    assert.equal(window.mockSaveCount, before + 1);
+    for (const f of fixed) assert.ok(!key(window, f.label), `${f.label} cleared`);
+    assert.ok(!key(window, 'Pixel Sent') && !key(window, 'Successful Tracking Test'), 'dates cleared');
+    assert.equal(key(window, 'Tech notes'), 'Existing note from the implementer', 'fields Fill leaves alone stay');
+    assert.equal(key(window, 'Img tag implemented', 'Commercial Checklist'), 'No', 'other checklists stay');
+  });
+}
+
+test('"Clear checklist" with Fill & save asks first; cancelling changes nothing', async () => {
+  const window = await open('native');
+  const ui = panel(window);
+  ui.querySelector('.template').value = 'clear';
+  ui.querySelector('.template').dispatchEvent(new window.Event('change'));
+  let asked = '';
+  window.confirm = text => { asked = text; return false; };
+  ui.querySelector('.save').click();
+  await new Promise(r => setTimeout(r, 50));
+  assert.match(asked, /Clear 30 Technical Checklist fields and save the record\?/);
+  assert.equal(window.mockSaveCount || 0, 0);
+  assert.equal(ui.querySelector('.status').dataset.state, undefined);
+});
+

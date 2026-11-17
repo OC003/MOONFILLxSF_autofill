@@ -70,6 +70,7 @@ The other 15 fields, such as Tech notes, are left untouched. If the Implementati
 - **Auto-detect platform** (the default). When you click Fill, Moonfill reads the client's site from the record's **Landing Page URL**, works out the platform from signs in the page, and applies that platform's template. It first downloads the page invisibly. If that's blocked or inconclusive, it opens the site briefly in a background tab, then closes it.
 - **A platform by name**, to skip detection: BigCommerce, Lightspeed, Magento, OpenCart, PrestaShop, Salesforce Commerce Cloud, Shopify, Shoplazza, Shopware 5, Shopware 6, Squarespace, Wix, WooCommerce.
 - **Default (no template).**
+- **Clear checklist.** Empties every field Fill fills, the dates included; dropdowns go back to --None--. Fields Fill leaves alone, such as notes and the scan's fields, stay as they are. **Fill only** clears without saving; **Fill & save** asks before it clears and saves.
 
 Template values only fill **empty** fields, so an answer that's already there is kept. If there's no Landing Page URL, no platform is recognised, or the signs point to two platforms, the default fill is used and the panel says why. Detection needs permission to read websites, which you grant once in Settings (**Allow platform detection**). Until then, the default fill is used.
 
@@ -80,6 +81,38 @@ Template values only fill **empty** fields, so an answer that's already there is
 - **Record creation date** or **Today's date**, for the two date fields only
 
 You can also allow or turn off platform detection, choose the date format (DD/MM/YYYY or MM/DD/YYYY) and reset everything to the team defaults. Your own choices win over templates. Settings are yours alone. They follow your Edge or Chrome profile and take effect on your next click. You can also open them from the extensions page: Moonfill → **Details** → **Extension options**.
+
+### New Implementation setup
+
+Clicking **🚀 New Implementation** on a record opens a short setup form instead of just the tabs.
+
+**Filled in from the record, for you to check:**
+- **Website URL** and **Landing Page:** from the Landing Page URL. For Shopify stores, the Website URL is the store's `https://…myshopify.com` address; this needs platform detection allowed in Settings.
+- **Platform Offer:** Access, Accelerate or Advanced.
+
+**Your answers:**
+- Transaction Type, Commission Type and Publisher commission
+- Approval of Publishers Joining and Validation Period Days
+
+Press **Run setup**. The 10 pages open in a tab group and are done one at a time:
+
+| Page | What the setup does |
+|---|---|
+| Tracking settings | Website URL, Landing Page, query string append (by Platform Offer), Link Builder and relative URLs ticked |
+| Invite user, Fee manager | skipped (they come pre-filled) |
+| Commission groups | Transaction Type, Commission Type, Publisher commission |
+| Plugin store | Not for Access. Otherwise adds **R.O.EYE - Consent - SingleView** with its code line |
+| Tracking tag settings | **Conversion Tag and Image Pixel integrated** |
+| Account details | IP tracking, and stripping the referrer path when it has no valid domain |
+| Mobile tracking | **Tracking is implemented on mobile site** |
+| Advertiser settings | Approval of Publishers Joining, Validation Period Days |
+| Pre-join publishers | Publishers 45628 and 111, retried up to 5 times if the page shows an error |
+
+**How each page ends up:**
+- Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. The form lists each page's result, and a notification sums it up.
+- A page that fails is left open and unsaved, and the setup carries on with the next one.
+- With **Save each page** off (the default), pages are filled but not saved, so you can check them first.
+- **Just open the tabs** opens the pages without filling anything, as before.
 
 ### Fields filled by both
 
@@ -214,6 +247,8 @@ Scans built by Rodier for Awin agents. The Technical Checklist comes from Salesf
 - Personal **Settings** for every checklist field.
 - **Platform templates** for 13 eCommerce platforms, picked by hand or detected from the client's site.
 - Usage counting by Assigned TC, to measure adoption. No client information is recorded.
+- **New Implementation setup:** a form on 🚀, then the setup pages are filled and saved one by one.
+- **Clear checklist** preset in the Template menu.
 
 **v2.1**
 - **Fills Salesforce fields from the result**, silently, right after the result is pasted: Moonpull Status, Consent Signals, Transparency & Consent Framework Plugin, AASAF and Consent Management Platform are set (existing values replaced) and saved. No setting; the notification only mentions fields that need a look.

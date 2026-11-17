@@ -146,7 +146,7 @@
     let created = null;
     const out = [];
     for (const f of planTargets(fields).targets) {
-      if (!f.rule) { out.push(f); continue; }
+      if (!f.rule || f.clear) { out.push(f); continue; }
       let date;
       if (f.rule === 'today') date = todayIso();
       else if (f.rule === 'record-created-date') {
@@ -160,8 +160,11 @@
   }
 
   // Does text show this field's intended value? Dates compare as dates, whatever format Salesforce shows.
-  const shows = (field, text, cfg) => (field.date ? parseDate(text, cfg) === field.date : norm(text) === norm(field.value));
+  // A field being cleared shows nothing (or --None--).
   const isBlank = text => ['', '--none--', '--none-'].includes(norm(text));
+  const shows = (field, text, cfg) => (field.clear ? isBlank(text) : field.date ? parseDate(text, cfg) === field.date : norm(text) === norm(field.value));
+  // The option a field's value picks: for a cleared field, the blank one.
+  const picks = (field, text, value) => (field.clear ? isBlank(text) || value === '' : norm(text) === norm(field.value) || value === field.value);
   const describeRule = f => (f.rule === 'today' ? "today's date" : f.rule === 'record-created-date' ? "the record's creation date" : `"${f.value}"`) + (f.onlyIfEmpty ? ' (only if empty)' : '');
 
   function fieldItems(section, cfg) {
@@ -290,7 +293,7 @@
     }
     if (!options) throw new StopError(`"${field.label}": the dropdown did not open.`);
     const texts = options.map(o => optionText(o, cfg));
-    const matches = options.filter((o, i) => norm(texts[i]) === norm(field.value));
+    const matches = options.filter((o, i) => picks(field, texts[i], o.getAttribute('data-value')));
     if (matches.length !== 1) {
       press(control.el, 'Escape');
       if (control.el.isConnected && control.el.getAttribute('aria-expanded') === 'true') control.el.click();
@@ -419,7 +422,7 @@
       const writes = [];
       for (const field of targets) {
         const c = control(field);
-        if (c.kind === 'select' && ![...c.el.options].some(o => !o.disabled && (norm(o.text) === norm(field.value) || o.value === field.value))) {
+        if (c.kind === 'select' && ![...c.el.options].some(o => !o.disabled && picks(field, o.text, o.value))) {
           throw new StopError(`"${field.label}": option "${field.value}" is not available. Options shown: ${[...c.el.options].map(o => o.text).join(', ')}.`);
         }
         if (field.onlyIfEmpty && !isBlank(readAny(c.el, cfg))) { notes.push(`${field.label} already had a value, so it was kept.`); continue; }
@@ -432,7 +435,7 @@
         const c = control(field);
         if (shows(field, readAny(c.el, cfg), cfg)) continue;
         if (c.kind === 'picklist') await choosePicklist(c, c.item, cfg, field);
-        else if (c.kind === 'select') setNative(c.el, [...c.el.options].find(o => !o.disabled && (norm(o.text) === norm(field.value) || o.value === field.value)).value);
+        else if (c.kind === 'select') setNative(c.el, [...c.el.options].find(o => !o.disabled && picks(field, o.text, o.value)).value);
         else setNative(c.el, field.value);
         changed++;
         const kept = await waitFor(() => { try { return shows(field, readAny(control(field).el, cfg), cfg); } catch { return false; } }, cfg.timeouts.dropdown, cfg.pollMs);
@@ -563,6 +566,6 @@
   }
 
   root.TCAEngine = { planTargets, findChecklist, fieldItems, run, checkPage, isEditing, all, parseDate, formatDate, createdDate, todayIso, landingPageUrl, recordField, assignedTc,
-    // Shadow-DOM aware helpers, shared with the programme setup pages (setup/page.js).
-    dom: { all, cleanText, visible, closest, norm, describe, parentOf } };
+    // Shadow-DOM aware helpers, shared with the programme setup pages (setup/fill.js).
+    dom: { all, cleanText, visible, closest, norm, describe, parentOf, setNative, clickLikeUser, waitFor, sleep } };
 })(globalThis);
