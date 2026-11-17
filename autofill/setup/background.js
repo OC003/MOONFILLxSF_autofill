@@ -197,7 +197,7 @@
     progress({ done: true, summary, cancelled, needsLook: needsLook.length });
     try {
       chrome.notifications.create(`tcaSetup-${mid}-${Date.now()}`, {
-        type: 'basic', iconUrl: 'assets/icon128.png', title: `Setup for MID ${mid}: ${cancelled ? 'cancelled' : needsLook.length ? 'needs a look' : 'done'}`,
+        type: 'basic', iconUrl: 'assets/autosetup128.png', title: `Setup for MID ${mid}: ${cancelled ? 'cancelled' : needsLook.length ? 'needs a look' : 'done'}`,
         message: `${summary}.${needsLook.length ? ' ' + needsLook.map(r => `${r.name}: ${r.message}`).join(' ') : ''}`.slice(0, 400)
       });
     } catch { /* notifications are a nicety */ }
