@@ -80,6 +80,38 @@ test('tracking settings: if the page loads its saved settings over the typed val
   assert.equal(w.document.getElementById('ClickAppend').value, 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!');
 });
 
+test('tracking settings: every "Add to Accepted Domains" prompt under a new address is clicked before saving', async () => {
+  const w = awin('/tracking-settings/us/awin/advertiser/123456/main-settings', `<div><input id="MainWebsiteURL"><div class="warn" id="warn1" hidden>⚠ <span class="link">Add to Accepted Domains</span></div></div>
+    <div><input id="GlobalClickThroughPage"><div class="warn" id="warn2" hidden>⚠ <span class="link">Add to Accepted Domains</span></div></div>
+    <input id="ClickAppend"><input type="checkbox" id="DeeplinkEnabled"><input type="checkbox" id="NoDomainDeeplink"><button id="save">Save</button>`,
+  `document.getElementById('MainWebsiteURL').addEventListener('change', () => { document.getElementById('warn1').hidden = false; });
+   document.getElementById('GlobalClickThroughPage').addEventListener('change', () => { document.getElementById('warn2').hidden = false; });
+   window.accepted = 0;
+   document.addEventListener('click', e => { const w = e.target.closest('.warn'); if (w) { w.remove(); window.accepted++; } });
+   document.getElementById('save').addEventListener('click', () => { window.savedWith = window.accepted; });`);
+  const result = await fill(w, VALUES, true);
+  assert.equal(result.status, 'saving', result.message);
+  assert.equal(w.accepted, 2);
+  assert.equal(result.note, 'Added to Accepted Domains 2 times.');
+  await tick(150);
+  assert.equal(w.savedWith, 2, 'both were added before Save was clicked');
+});
+
+test('commission groups: if the row can\'t be found, the result describes the page (structure only)', async () => {
+  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
+    <button type="button" id="add">Add Default Commission Group</button>
+    <div class="grid"><span class="h">Transaction Type</span><span class="h">Commission Type</span>
+      <div class="cells" id="cells" hidden><input type="text" value="Secret group 98765"><div class="ng-select"></div></div></div>`,
+  `document.getElementById('add').addEventListener('click', () => { document.getElementById('cells').hidden = false; });`);
+  Object.assign(w.TCASetupFill.T, {quietMax: 200});
+  const result = await fill(w);
+  assert.equal(result.status, 'failed');
+  assert.match(result.diagnostics, /clicked "Add Default Commission Group" \(button\)/);
+  assert.match(result.diagnostics, /"Transaction Type" heading: span\.h < div\.grid/);
+  assert.match(result.diagnostics, /2 box\(es\) outside any row: input:text in div\.cells < div\.grid \| div\.ng-select in div\.cells < div\.grid/);
+  assert.doesNotMatch(result.diagnostics, /Secret|98765/, 'no values');
+});
+
 test('pages that come pre-filled are skipped, and the plugin is skipped for Access', async () => {
   assert.equal((await fill(awin('/awin/merchant/123456/settings/invite-user', '<input id="email">'))).status, 'skipped');
   assert.equal((await fill(awin('/provider/finance/fee-manager/en/123456', ''))).status, 'skipped');

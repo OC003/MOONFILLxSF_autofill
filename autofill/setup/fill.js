@@ -148,6 +148,15 @@
     }
   }
 
+  // Something clickable by its text: a button or link, or (for prompts drawn as plain text) the
+  // smallest visible element showing exactly that text.
+  function clickableText(text) {
+    const b = button(text);
+    if (b) return b;
+    const hits = shown('span, a, u, strong, b, div, p, label, small').filter(el => same(cleanText(el, NOISE), text));
+    return hits.find(el => !hits.some(other => other !== el && el.contains(other))) || null;
+  }
+
   // A short description of a box, to show in the run's results.
   function describeBox(box) {
     const el = box.editor || box.el;
@@ -276,6 +285,29 @@
     return [t, c, rate];
   }
 
+  // What page 3 looks like, for the run's results when it fails: structure only, no values.
+  let commissionLog = [];
+  const describeEl = el => {
+    const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(c => '.' + c).join('');
+    return `${el.tagName.toLowerCase()}${el.getAttribute('role') ? `[role=${el.getAttribute('role')}]` : ''}${cls}`;
+  };
+  const chain = el => { const out = []; for (let n = el; n && n !== doc().body && out.length < 6; n = n.parentElement) out.push(describeEl(n)); return out.join(' < '); };
+  function describeCommissionPage() {
+    const parts = [...commissionLog];
+    for (const title of ['Transaction Type', 'Commission Type', 'Publisher Commission']) {
+      const el = labelElement(title);
+      parts.push(el ? `"${title}" heading: ${chain(el)}` : `no "${title}" heading`);
+    }
+    const kinds = el => (el.tagName === 'INPUT' ? `input:${el.type || 'text'}` : describeEl(el));
+    const rows = shown(ROW).filter(r => !inSwitcher(r)).map(r => ({ r, boxes: all(r, BOX).filter(visible) })).filter(x => x.boxes.length && !inSwitcher(x.r));
+    parts.push(`${rows.length} row(s) with boxes`);
+    for (const { r, boxes } of rows.slice(0, 6)) parts.push(`row ${describeEl(r)}: ${boxes.length} box(es) [${boxes.slice(0, 8).map(kinds).join(', ')}]`);
+    const loose = shown(BOX).filter(el => !inSwitcher(el) && !closest(el, ROW));
+    if (loose.length) parts.push(`${loose.length} box(es) outside any row: ${loose.slice(0, 8).map(el => `${kinds(el)} in ${chain(el.parentElement)}`).join(' | ')}`);
+    parts.push(diagnostics());
+    return parts.join('; ').replace(/\d{4,}/g, '#');
+  }
+
   let pluginScope = null;   // the plugin menu, once open
 
   // Page 1's fields: by id (from the page check), or by label if the id differs.
@@ -311,6 +343,18 @@
         if (!this.verify(v).every(Boolean)) { await settled(); await write(); await sleep(T.recheck); }
         const wrong = TRACKING.filter((f, i) => !this.verify(v)[i]).map(([, label]) => label);
         if (wrong.length) fail(`${wrong.join(', ')} kept changing back after being filled.`);
+        // A new address shows a warning under its box with "Add to Accepted Domains": click each one.
+        const prompt = () => clickableText('Add to Accepted Domains');
+        await waitFor(prompt, 3000);
+        let added = 0;
+        for (let p = prompt(); p && added < 6; p = prompt()) {
+          clickLikeUser(p);
+          added++;
+          await waitFor(() => prompt() !== p || !p.isConnected, 2000);
+          await sleep(300);
+        }
+        if (prompt()) fail('"Add to Accepted Domains" was clicked but is still showing.');
+        return added ? { note: `Added to Accepted Domains ${added === 1 ? 'once' : `${added} times`}.` } : null;
       },
       save: () => button('Save'),
       verify: v => {
@@ -326,9 +370,11 @@
       // The row appears after clicking "Add Default Commission Group".
       async fill(v) {
         await waitFor(() => commissionRow() || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
+        commissionLog = [];
         for (const name of ['Add Default Commission Group', 'Edit Commission Groups']) {
           if (commissionRow()) break;
           const open = button(name);
+          commissionLog.push(open ? `clicked "${name}" (${describeEl(open)})` : `no "${name}" button`);
           if (open) { clickLikeUser(open); await waitFor(commissionRow, 8000); await sleep(500); }
         }
         const row = commissionRow();
@@ -338,7 +384,8 @@
         await choose(commission, v.commissionType, 'Commission Type');
         await setText(rate, v.publisherCommission, 'Publisher commission');
       },
-      save: () => button(['Save', 'Save changes', 'Update', 'Confirm'])
+      save: () => button(['Save', 'Save changes', 'Update', 'Confirm']),
+      diagnose: () => describeCommissionPage()
     },
     {
       key: 'plugin', name: 'Plugin store', match: /\/advertiser-mastertag\/.*\/plugins/,
@@ -452,7 +499,7 @@
       if (!save) return { status: 'filled', message: `Filled, not saved: check it, then save it yourself.${note ? ' ' + note : ''}`, page: page.key, note };
       return { ...(await clickSave(page.save(), 'Save')), page: page.key, note };
     } catch (error) {
-      return { status: 'failed', message: error instanceof SetupError ? error.message : `Unexpected error: ${error.message}`, page: page.key, diagnostics: diagnostics() };
+      return { status: 'failed', message: error instanceof SetupError ? error.message : `Unexpected error: ${error.message}`, page: page.key, diagnostics: page.diagnose ? page.diagnose() : diagnostics() };
     }
   }
 

@@ -79,7 +79,7 @@
       await waitAfterSave(tabId);
       await sleep(T.settle);
       result = { ...(await ask(tabId, { action: 'tcaSetupVerify', values })), attempts: attempt };
-      if (filled.note) result.message = `${result.message} ${filled.note}`;
+      if (filled.note) Object.assign(result, { message: `${result.message} ${filled.note}`, note: filled.note });
       // Only Pre-join publishers is retried: it often shows an error on the first try.
       if (result.status !== 'failed' || filled.page !== 'prejoin') return result;
       if (attempt < T.retries) await sleep(T.retryWait);
@@ -119,7 +119,7 @@
       }
       results.push({ name: PAGES[i], ...result });
       chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL[result.status] || '⚠' }).catch(() => {});
-      progress({ index: i, name: PAGES[i], status: result.status, message: result.message, diagnostics: result.diagnostics });
+      progress({ index: i, name: PAGES[i], status: result.status, message: result.message, note: result.note, diagnostics: result.diagnostics });
     }
 
     const needsLook = results.filter(r => r.status === 'failed' || r.status === 'unconfirmed');

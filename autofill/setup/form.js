@@ -110,7 +110,7 @@
     <div class="progress" hidden>
       <ol>${PAGES.map((p, i) => `<li data-index="${i}"><span class="icon">·</span> ${p} <span class="msg"></span></li>`).join('')}</ol>
       <div class="summary" role="status" aria-live="polite">Running… The pages open in a tab group and are done one at a time.</div>
-      <div class="row"><button type="button" class="close">Close</button></div>
+      <div class="row"><button type="button" class="copy">Copy results</button><button type="button" class="close">Close</button></div>
     </div>
   </div>
 </div>`;
@@ -176,9 +176,16 @@
     if (!li) return;
     li.dataset.status = update.status;
     li.querySelector('.icon').textContent = ICON[update.status] || '·';
-    const note = update.message && /Code typed into/.test(update.message) ? update.message.slice(update.message.indexOf('Code typed into')) : '';
+    const note = update.note || '';
     li.querySelector('.msg').textContent = update.status === 'working' ? `${update.message || 'working'}…` : update.status === 'saved' ? (note ? `— ${note}` : '') : `— ${update.message || ''}${update.diagnostics ? ` (${update.diagnostics})` : ''}`;
   }
+
+  // The results as text (page, status, message, structure report), to paste to whoever maintains it.
+  $('.copy').addEventListener('click', async () => {
+    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.summary').textContent].join('\n');
+    try { await navigator.clipboard.writeText(text); $('.copy').textContent = 'Copied'; } catch { $('.copy').textContent = 'Copy failed'; }
+    setTimeout(() => { $('.copy').textContent = 'Copy results'; }, 2000);
+  });
 
   const close = () => { $('.backdrop').hidden = true; };
   $('.cancel').addEventListener('click', close);
