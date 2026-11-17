@@ -343,11 +343,11 @@
     } catch { return null; }
   }
 
-  // The client's site from the record's Landing Page URL field: { url } or { reason }. Read outside
-  // edit mode, from the active record only; a link's address is preferred over its displayed text.
-  function landingPageUrl(doc, cfg) {
+  // A record field read outside edit mode, from the active record only: one { text, href } per
+  // matching field (href is a link's web address, if it has one). An empty list means no such field.
+  function recordField(doc, cfg, label) {
     const S = cfg.selectors;
-    const want = norm(cfg.landingPageLabel);
+    const want = norm(label);
     const items = [];
     for (const labelEl of all(activeRoot(doc, cfg), S.label)) {
       if (norm(cleanText(labelEl, S.labelNoise)) !== want) continue;
@@ -355,13 +355,25 @@
       for (const sel of S.item) { item = closest(labelEl, sel); if (item) break; }
       if (item && !items.includes(item)) items.push(item);
     }
-    for (const item of items) {
-      const href = all(item, 'a[href]').map(a => a.getAttribute('href')).find(h => /^https?:\/\//i.test(h));
-      const url = webAddress(href || viewValue(item, cfg));
+    return items.map(item => ({
+      text: viewValue(item, cfg) || '',
+      href: all(item, 'a[href]').map(a => a.getAttribute('href')).find(h => /^https?:\/\//i.test(h)) || null
+    }));
+  }
+
+  // The client's site from the record's Landing Page URL field: { url } or { reason }. A link's
+  // address is preferred over its displayed text.
+  function landingPageUrl(doc, cfg) {
+    const found = recordField(doc, cfg, cfg.landingPageLabel);
+    for (const f of found) {
+      const url = webAddress(f.href || f.text);
       if (url) return { url };
     }
-    return { reason: items.length ? `"${cfg.landingPageLabel}" is empty or isn't a web address` : `no "${cfg.landingPageLabel}" field found on this record` };
+    return { reason: found.length ? `"${cfg.landingPageLabel}" is empty or isn't a web address` : `no "${cfg.landingPageLabel}" field found on this record` };
   }
+
+  // The person in the record's Assigned TC field, or '' if it is empty or missing.
+  const assignedTc = (doc, cfg) => (recordField(doc, cfg, cfg.assignedTcLabel).find(f => f.text) || {}).text || '';
 
   // ---------- Fill (and optionally save) ----------
 
@@ -514,6 +526,7 @@
     lines.push(`${cfg.history.title}: ${created.date ? 'creation date found' : `✗ ${created.reason}`}`);
     const site = landingPageUrl(doc, cfg);
     lines.push(`${cfg.landingPageLabel}: ${site.url ? 'found' : `✗ ${site.reason}`} · template: ${opts.template || 'auto-detect (runs on Fill)'}`);
+    lines.push(`${cfg.assignedTcLabel}: ${assignedTc(doc, cfg) ? 'found' : recordField(doc, cfg, cfg.assignedTcLabel).length ? 'empty' : '✗ not found on this record'}`);
 
     const { targets } = planTargets(fields);
     lines.push(`Fields to fill (${targets.length}):`);
@@ -549,5 +562,7 @@
     return lines.join('\n');
   }
 
-  root.TCAEngine = { planTargets, findChecklist, fieldItems, run, checkPage, isEditing, all, parseDate, formatDate, createdDate, todayIso, landingPageUrl };
+  root.TCAEngine = { planTargets, findChecklist, fieldItems, run, checkPage, isEditing, all, parseDate, formatDate, createdDate, todayIso, landingPageUrl, recordField, assignedTc,
+    // Shadow-DOM aware helpers, shared with the programme setup pages (setup/page.js).
+    dom: { all, cleanText, visible, closest, norm, describe, parentOf } };
 })(globalThis);

@@ -64,3 +64,13 @@
     return true; // answers asynchronously
   });
 })();
+
+// Usage reporting (usage.js): queues "who used what" records and sends them to SharePoint once
+// config.usage.site is set. Kept separate so a failure here can't affect site reading above.
+try {
+  if (typeof importScripts === 'function' && !globalThis.TCAUsage) importScripts('autofill/config.js', 'autofill/usage.js');
+  const cfg = globalThis.TCA_CONFIG;
+  if (globalThis.TCAUsage) globalThis.TCAUsage.startBackground({ chrome, fetch: (...args) => fetch(...args), cfg, global: globalThis, version: cfg.version });
+} catch (error) {
+  console.error('Moonfill usage reporting failed to start', error);
+}

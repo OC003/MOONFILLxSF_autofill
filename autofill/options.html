@@ -15,6 +15,7 @@
   h2 { font-size: 15px; margin: 0 0 8px; }
   p { margin: 0 0 8px; }
   .muted { color: var(--muted); }
+  .small-print { font-size: 12px; margin-top: 16px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 16px; }
   label.inline { display: inline-flex; gap: 8px; align-items: center; }
   select, input[type=text] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--text); }
@@ -66,6 +67,8 @@
       <tbody id="fields"></tbody>
     </table>
   </section>
+
+  <p class="muted small-print">Moonfill counts each use (checklist fills, Moonpull scans, New Implementation and IR) by the record's Assigned TC, to measure adoption. No client information is recorded.</p>
 </main>
 <div class="bar">
   <button class="primary" id="save" type="button">Save settings</button>

@@ -35,6 +35,7 @@
       <option value="no-history">No "Created." line in history</option>
       <option value="dates-filled">Date fields already filled</option>
       <option value="no-landing">No Landing Page URL</option>
+      <option value="no-tc">Assigned TC empty</option>
     </select>
   </label>
 </div>
@@ -185,6 +186,11 @@
           h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Landing Page URL' })),
           h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value' },
             shadowHost('lightning-formatted-url', h('a', { href: 'https://shop.example.com/', text: 'shop.example.com' })))))),
+      h('records-record-layout-item', { 'field-label': 'Assigned TC' },
+        h('div', { class: 'slds-form-element slds-form-element_readonly' },
+          h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Assigned TC' })),
+          h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value' },
+            scenario === 'no-tc' ? null : h('a', { href: '/lightning/r/User/005MOCK/view', text: 'Alex Mock-Person' }))))),
       ...sections.map(s => sectionEl(s, draft || record, !!draft, true)),
       historyCard('03/11/2026', scenario !== 'no-history'),
       draft ? h('records-form-footer', { class: 'slds-docked-form-footer' },

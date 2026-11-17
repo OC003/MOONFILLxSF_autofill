@@ -183,7 +183,8 @@ When you report a problem, please send a screenshot of the Moonfill card or the 
 
 - The result posted in Chatter is the same text as the Teams message, without your name and job title.
 - The Teams message is still sent, so you always have a copy.
-- Moonfill only talks to Microsoft Forms, the Moonpull results folder and Salesforce, using your own logins. It stores the scan list on your computer only. Your checklist settings are kept in your browser profile, and follow it to your other devices if browser sync is on. The checklist works on the page in front of you. Its only network request is platform detection: when you click Fill with Auto-detect on, it reads the client's public site (the record's Landing Page URL) without your cookies. It sends nothing anywhere, and it only works once you've allowed it in Settings.
+- Moonfill only talks to Microsoft Forms, SharePoint (the Moonpull results folder and, once set up, the usage list) and Salesforce, using your own logins. It stores the scan list on your computer only. Your checklist settings are kept in your browser profile, and follow it to your other devices if browser sync is on. The checklist works on the page in front of you. Apart from the usage count, its only network request is platform detection: when you click Fill with Auto-detect on, it reads the client's public site (the record's Landing Page URL) without your cookies, and only once you've allowed it in Settings.
+- Moonfill counts each use (checklist fills, Moonpull scans, New Implementation and IR) by the record's Assigned TC, to measure adoption. No client information is recorded.
 - Moonfill is for scans started from a Salesforce record. There is no manual MID box anymore.
 - The checklist only changes the **Technical Checklist**. Other checklists and fields on the record are compared before and after, and never saved by it.
 
@@ -212,6 +213,7 @@ Scans built by Rodier for Awin agents. The Technical Checklist comes from Salesf
 - Pixel Sent from the record's creation date, and Successful Tracking Test from today's date.
 - Personal **Settings** for every checklist field.
 - **Platform templates** for 13 eCommerce platforms, picked by hand or detected from the client's site.
+- Usage counting by Assigned TC, to measure adoption. No client information is recorded.
 
 **v2.1**
 - **Fills Salesforce fields from the result**, silently, right after the result is pasted: Moonpull Status, Consent Signals, Transparency & Consent Framework Plugin, AASAF and Consent Management Platform are set (existing values replaced) and saved. No setting; the notification only mentions fields that need a look.

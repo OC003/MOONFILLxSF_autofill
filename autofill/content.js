@@ -149,7 +149,20 @@
     Object.assign(state, { running: false, status: result.status, message: [...notes, result.message].join(' ') });
     paint();
     detect();
+    recordUsage(mode, result);
   }
+
+  // Usage reporting: one record per Fill, sent to the background script. Only the outcome and a
+  // reason code are kept from the result (usage.js turns the message into a code).
+  function recordUsage(mode, result) {
+    const ok = result.status === 'saved' || result.status === 'filled';
+    const event = {
+      tool: 'Checklist', action: mode === 'save' ? 'fill-save' : 'fill', outcome: ok ? 'success' : 'failed',
+      reason: result.status === 'unconfirmed' ? 'unconfirmed' : result.message, tc: assignedTc()
+    };
+    Promise.resolve().then(() => chrome.runtime.sendMessage({ action: 'tcaUsage', event })).catch(() => {});
+  }
+  const assignedTc = () => { try { return engine.assignedTc(document, cfg); } catch { return ''; } };
 
   async function check() {
     let report;
@@ -181,10 +194,18 @@
   $('.template').addEventListener('change', e => { state.template = e.target.value; });
   $('.fill').addEventListener('click', () => act('fill'));
   $('.save').addEventListener('click', () => act('save'));
-  $('.settings').addEventListener('click', () => {
-    // Opened directly: the settings page is web-accessible on Salesforce only.
-    try { window.open(chrome.runtime.getURL('autofill/options.html'), '_blank'); } catch { state.message = 'Open Settings from edge://extensions → Moonfill → Details → Extension options.'; paint(); }
-  });
+  // Opened directly: the settings page is web-accessible on Salesforce only.
+  const openPage = page => {
+    try { window.open(chrome.runtime.getURL(`autofill/${page}`), '_blank'); } catch { state.message = 'Open Settings from edge://extensions → Moonfill → Details → Extension options.'; paint(); }
+  };
+  $('.settings').addEventListener('click', () => openPage('options.html'));
+  // The background script asks for the record's Assigned TC when a Moonfill button is used here.
+  try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message && message.action === 'tcaAssignedTc') sendResponse({ name: assignedTc() });
+      return undefined;
+    });
+  } catch { /* no extension messaging (tests) */ }
   settings.onChange(() => refresh().then(paint));
 
   (document.body || document.documentElement).appendChild(host);

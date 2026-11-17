@@ -3,7 +3,7 @@
 // ones follow Moonfill (github.com/OptimusRodier/moonfill), which fills fields on awin.lightning.force.com,
 // but the Technical Checklist itself is unverified. Use the panel's "Check page" report to correct them.
 globalThis.TCA_CONFIG = {
-  version: '0.6.0',
+  version: '0.7.0',
   checklistTitle: 'Technical Checklist',
 
   // Date fields (Pixel Sent, Successful Tracking Test) are typed in this format, as a user would type
@@ -37,6 +37,13 @@ globalThis.TCA_CONFIG = {
     'Wix': [/static\.wixstatic\.com/i, /parastorage\.com/i, /x-wix-request-id/i, /wixsite\.com/i, /\bwix-bolt\b/i],
     'WooCommerce': [/wp-content\/plugins\/woocommerce\//i, /woocommerce-no-js/i, /\bwc-block-/i, /woocommerce_params|wc_add_to_cart_params/]
   },
+
+  // Usage reporting: who used the extension comes from this record field (a person, not the logged-in
+  // user). Records hold the person, tool, action, outcome, a reason code and the version, nothing about
+  // the client. They are sent to this SharePoint list once 'site' is set, e.g.
+  // 'https://zanox.sharepoint.com/teams/<team>'. While it is empty they wait in the browser.
+  assignedTcLabel: 'Assigned TC',
+  usage: { site: '', list: 'Plugin usage' },
 
   selectors: {
     // The visible record page. Lightning keeps recently viewed records in the page, hidden.

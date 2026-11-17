@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Tracking settings · Advertiser 123456 (mock)</title></head>
+<body>
+<!-- Fictional Awin UI-style settings page for testing the setup Check page. No real data. -->
+<main ng-version="16.2.0">
+  <h1>Main settings</h1>
+  <div role="tablist"><button role="tab" type="button">General</button><button role="tab" type="button">Advanced</button></div>
+  <form id="settings">
+    <fieldset>
+      <legend>Cookie settings</legend>
+      <label for="cookie">Cookie period (days)</label>
+      <input id="cookie" name="cookiePeriod" type="number" value="30" required>
+      <label>Tracking domain <input name="domain" type="text" value="secret-shop.example.com"></label>
+      <div class="row"><span class="field-title">Contact email</span><div><input type="email" formcontrolname="contact" value="person@client.example"></div></div>
+    </fieldset>
+    <section class="card">
+      <h3>Commission</h3>
+      <select id="model" name="model"><option>CPA</option><option selected>CPS</option><option>Hybrid</option></select>
+      <span id="dedupLabel">Deduplication</span>
+      <div role="combobox" aria-labelledby="dedupLabel" aria-controls="dedupList" tabindex="0">Choose…</div>
+      <ul id="dedupList" role="listbox"><li role="option">Last click</li><li role="option">First click</li></ul>
+      <label><input type="checkbox" name="pll" checked> Product level tracking</label>
+      <p>Voucher tracking</p>
+      <label><input type="radio" name="voucher" value="yes"> Yes</label>
+      <label><input type="radio" name="voucher" value="no" checked> No</label>
+      <textarea aria-label="Notes">Private note for 987654</textarea>
+      <input type="hidden" name="token" value="hidden-token">
+    </section>
+    <button type="submit" class="btn btn-primary">Save changes</button>
+    <button type="button" class="btn">Cancel</button>
+  </form>
+  <div class="alert alert-success" role="status">Settings saved</div>
+</main>
+</body>
+</html>

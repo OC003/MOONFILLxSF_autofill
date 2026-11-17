@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "for f in ../*.js; do node --check \"$f\" || exit 1; done",
+    "check": "for f in ../*.js ../setup/*.js; do node --check \"$f\" || exit 1; done",
     "generate": "node generate.js"
   },
   "devDependencies": {

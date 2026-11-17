@@ -20,7 +20,7 @@ function withChrome(saved, site = () => ({error: 'permission'})) {
   const listeners = [];
   let granted = false;
   const chrome = {
-    store, messages: [],
+    store, messages: [], usage: [], listeners: [],
     permissions: {
       contains: async () => granted,
       request: async () => (granted = true),
@@ -35,7 +35,12 @@ function withChrome(saved, site = () => ({error: 'permission'})) {
     },
     runtime: {
       getURL: path => 'chrome-extension://test/' + path,
-      sendMessage: async message => { chrome.messages.push(message); return site(message); }
+      // Usage records go to chrome.usage, so the site-reading assertions only see site requests.
+      sendMessage: async message => {
+        if (message.action === 'tcaUsage') { chrome.usage.push(message.event); return {ok: true}; }
+        chrome.messages.push(message); return site(message);
+      },
+      onMessage: {addListener: l => chrome.listeners.push(l)}
     }
   };
   return chrome;
@@ -600,4 +605,59 @@ test('background: refuses without permission or a web address; ignores Moonfill 
   assert.deepEqual(JSON.parse(JSON.stringify(await ask({action: 'tcaReadSite', url: 'javascript:alert(1)'}))), {error: 'not a web address'});
   assert.equal(await ask({action: 'openForm', url: 'https://forms.office.com/x'}), 'ignored');
   assert.equal(calls.fetched.length + calls.created.length, 0);
+});
+
+// ---------- Usage reporting from the checklist panel ----------
+
+test('usage: Fill & save records the Assigned TC, tool and success, and nothing about the client', async () => {
+  const chrome = withChrome();
+  const window = await open('lightning', 'success', null, chrome);
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(chrome.usage.length, 1);
+  const [event] = chrome.usage;
+  assert.deepEqual([event.tool, event.action, event.outcome, event.tc], ['Checklist', 'fill-save', 'success', 'Alex Mock-Person']);
+  // usage.js keeps only the reason's code, never the message itself.
+  const {TCAUsage} = await usageModule();
+  assert.equal(TCAUsage.row(chrome.usage[0], '0.7.0').Reason, '');
+});
+
+test('usage: a failed Fill only is recorded as failed with an empty Assigned TC', async () => {
+  const chrome = withChrome();
+  const window = await open('lightning', 'no-tc', null, chrome);
+  const status = await press(window, 'fill');
+  assert.equal(status.dataset.state, 'filled', status.textContent);
+  const window2 = await open('lightning', 'missing-option', null, chrome);
+  const failed = await press(window2, 'save');
+  assert.equal(failed.dataset.state, 'failed');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(chrome.usage.map(e => [e.action, e.outcome, e.tc]), [['fill', 'success', ''], ['fill-save', 'failed', 'Alex Mock-Person']]);
+});
+
+test('usage: the panel tells the background script the Assigned TC when asked', async () => {
+  const chrome = withChrome();
+  await open('lightning', 'success', null, chrome);
+  let answer;
+  chrome.listeners.forEach(l => l({action: 'tcaAssignedTc'}, {}, a => { answer = a; }));
+  assert.deepEqual(JSON.parse(JSON.stringify(answer)), {name: 'Alex Mock-Person'});
+  const other = chrome.listeners.map(l => l({action: 'openForm'}, {}, () => assert.fail('answered a Moonfill message')));
+  assert.deepEqual(other, [undefined]);
+});
+
+async function usageModule() {
+  const {default: vm} = await import('node:vm');
+  const context = vm.createContext({});
+  vm.runInContext(read('../usage.js'), context);
+  return context;
+}
+
+test('usage runs in the background: no Usage link on the panel, one plain line in Settings', async () => {
+  const window = await open('lightning');
+  assert.equal(panel(window).querySelector('.usage'), null);
+  assert.deepEqual([...panel(window).querySelectorAll('button.link')].map(b => b.textContent), ['Settings']);
+  const settings = await openOptions(withChrome());
+  const text = settings.document.body.textContent;
+  assert.match(text, /counts each use .* by the record's Assigned TC, to measure adoption\. No client information is recorded\./);
+  assert.equal(settings.document.querySelector('a[href="usage.html"]'), null, 'no link to the dashboard');
 });
