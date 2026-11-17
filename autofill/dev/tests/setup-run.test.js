@@ -542,6 +542,26 @@ test('form: the 🚀 click opens the setup form instead of Moonfill\'s tabs, fil
   assert.equal(f.save.checked, true, 'saving is on by default');
 });
 
+test('form: a MID of 0 means the advertiser isn\'t created in Awin yet, so nothing can be run', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome);
+  window.document.querySelector('a[href*="ui.awin.com/dashboard/awin/advertiser/"]').setAttribute('href', 'https://ui.awin.com/dashboard/awin/advertiser/0');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  assert.equal(ui.querySelector('.mid').textContent, 'MID 0');
+  assert.match(ui.querySelector('.error').textContent, /hasn't been created in Awin yet \(the MID is 0\)/);
+  assert.equal(ui.querySelector('button[type="submit"]').disabled, true);
+  assert.equal(ui.querySelector('.tabs-only').disabled, true);
+  ui.querySelector('form').dispatchEvent(new window.Event('submit', {cancelable: true}));
+  await tick();
+  assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupRun').length, 0);
+  assert.match(ui.querySelector('.error').textContent, /hasn't been created in Awin yet/, 'the message stays');
+
+  const {start, created} = runner(() => ({ok: true}));
+  assert.deepEqual(plain(await start({action: 'tcaSetupRun', mid: '0', values: VALUES})), {ok: false, error: "the MID is 0: the advertiser hasn't been created in Awin yet."});
+  assert.equal(created.length, 0, 'no tabs opened');
+});
+
 test('form: Shopify stores get their myshopify address as the Website URL', async () => {
   const chrome = fakeChrome(() => ({ok: true, status: 200, text: '<script>Shopify.shop = "fictional-shop.myshopify.com";</script> cdn.shopify.com'}));
   const window = await record(chrome);

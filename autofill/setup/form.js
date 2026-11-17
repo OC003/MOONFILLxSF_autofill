@@ -69,6 +69,7 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   button { font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 4px; border: 1px solid #0176d3; background: #fff; color: #0176d3; cursor: pointer; }
   button.primary { background: #0176d3; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
   button.link { border: 0; padding: 6px 4px; text-decoration: underline; margin-right: auto; }
   ol { margin: 0; padding: 10px 18px 4px 40px; display: grid; gap: 4px; }
   li .msg { color: #5c5c5c; font-size: 12px; }
@@ -118,6 +119,7 @@
   const form = $('form');
   const field = name => form.elements[name];
   let mid = '';
+  const notCreatedYet = m => /^0+$/.test(m);
 
   async function open() {
     mid = readMid();
@@ -128,6 +130,11 @@
     $('.progress').hidden = true;
     for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
     $('.mid').textContent = mid ? `MID ${mid}` : 'No MID found on this record.';
+    // MID 0 means the advertiser hasn't been created in Awin yet: there's nothing to set up.
+    const notCreated = notCreatedYet(mid);
+    $('.error').textContent = notCreated ? 'This advertiser hasn\'t been created in Awin yet (the MID is 0). Create it first, then run the setup.' : '';
+    $('button[type="submit"]').disabled = notCreated;
+    $('.tabs-only').disabled = notCreated;
     const site = engine.landingPageUrl(document, cfg).url || '';
     field('websiteUrl').value = site;
     field('landingPage').value = site;
@@ -156,6 +163,7 @@
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
+    if (notCreatedYet(mid)) return;   // the message is already showing
     let v;
     try { v = values(); } catch (error) { $('.error').textContent = error.message; return; }
     if (!mid) { $('.error').textContent = 'No MID found on this record.'; return; }
@@ -191,7 +199,7 @@
   $('.cancel').addEventListener('click', close);
   $('.close').addEventListener('click', close);
   $('.backdrop').addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
-  $('.tabs-only').addEventListener('click', () => { if (mid) ask({ action: 'createNITabs', mid }); close(); });
+  $('.tabs-only').addEventListener('click', () => { if (mid && !notCreatedYet(mid)) ask({ action: 'createNITabs', mid }); close(); });
 
   // Moonfill's 🚀 button: caught before its own click handler runs.
   window.addEventListener('click', event => {

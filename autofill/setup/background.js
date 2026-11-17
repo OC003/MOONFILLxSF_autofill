@@ -208,6 +208,7 @@
     if (!message || message.action !== 'tcaSetupRun') return undefined;
     const mid = String(message.mid || '').replace(/\D/g, '');
     if (!mid || !message.values) { sendResponse({ ok: false, error: 'No MID or values.' }); return undefined; }
+    if (/^0+$/.test(mid)) { sendResponse({ ok: false, error: 'the MID is 0: the advertiser hasn\'t been created in Awin yet.' }); return undefined; }
     sendResponse({ ok: true });
     run({ mid, values: message.values, save: !!message.save }, sender && sender.tab ? sender.tab.id : null)
       .catch(error => console.error('Moonfill setup failed', error));
