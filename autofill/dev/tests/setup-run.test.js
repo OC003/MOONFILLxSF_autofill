@@ -268,7 +268,7 @@ test('form: the 🚀 click opens the setup form instead of Moonfill\'s tabs, fil
   assert.deepEqual([f.websiteUrl.value, f.landingPage.value, f.platformOffer.value], ['https://shop.example.com/', 'https://shop.example.com/', 'Advanced']);
   assert.equal(ui.querySelector('.mid').textContent, 'MID 123456');
   assert.match(ui.querySelector('.shopify').textContent, /turn on platform detection in Settings/);
-  assert.equal(f.save.checked, false, 'saving is off until chosen');
+  assert.equal(f.save.checked, true, 'saving is on by default');
 });
 
 test('form: Shopify stores get their myshopify address as the Website URL', async () => {
@@ -294,7 +294,6 @@ test('form: Run setup checks the answers, then starts the run with them; Just op
   await tick();
   assert.match(ui.querySelector('.error').textContent, /whole number of days/);
   f.validationDays.value = '30';
-  f.save.checked = true;
   ui.querySelector('button[type="submit"]').click();
   await tick();
   const run = chrome.messages.find(m => m.action === 'tcaSetupRun');
@@ -322,5 +321,13 @@ test('manifest: the setup filler runs on ui.awin.com only, top frame, with no pa
   assert.equal(entry.all_frames, undefined);
   const w = awin('/tracking-settings/us/awin/advertiser/1/main-settings', '');
   assert.equal(w.document.querySelector('[id^="tca-"]'), null, 'nothing is added to Awin pages');
+});
+
+test('form: turning Save each page off is remembered for the next run', async () => {
+  const chrome = fakeChrome();
+  chrome.local.tcaSetupSave = false;
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  assert.equal(formRoot(window).querySelector('form').elements.save.checked, false);
 });
 

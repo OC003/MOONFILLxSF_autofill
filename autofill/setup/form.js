@@ -132,7 +132,8 @@
     field('websiteUrl').value = site;
     field('landingPage').value = site;
     field('platformOffer').value = readOffer();
-    try { field('save').checked = !!(await chrome.storage.local.get(SAVE_KEY))[SAVE_KEY]; } catch { /* default off */ }
+    // Saving is on unless the TC has turned it off before.
+    try { field('save').checked = (await chrome.storage.local.get(SAVE_KEY))[SAVE_KEY] !== false; } catch { field('save').checked = true; }
     $('.backdrop').hidden = false;
     field('transactionType').focus();
     if (site) {

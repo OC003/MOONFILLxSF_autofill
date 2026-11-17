@@ -81,7 +81,7 @@ The signs were checked against live public shops for Shopify, WooCommerce, BigCo
 **Not yet verified on the live pages:**
 - Commission groups, Plugin store and Tracking tag settings: the page check (a temporary panel, since removed) couldn't see their fields, so they're found by text at run time. If they sit inside a frame from another site, the run reports it, and the content script will need that frame's host.
 - Pre-join publishers' exact layout, error and confirmation messages, and whether a Save reloads each page.
-- First runs: **Save each page** off, on a test advertiser.
+- First runs: on a test advertiser (Save each page is on by default).
 - The run isn't resumed if the browser closes the worker mid-run.
 
 ## Usage reporting

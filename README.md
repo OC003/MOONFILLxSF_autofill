@@ -111,7 +111,7 @@ Press **Run setup**. The 10 pages open in a tab group and are done one at a time
 **How each page ends up:**
 - Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. The form lists each page's result, and a notification sums it up.
 - A page that fails is left open and unsaved, and the setup carries on with the next one.
-- With **Save each page** off (the default), pages are filled but not saved, so you can check them first.
+- **Save each page** is on by default. Turn it off to have the pages filled but not saved, so you can check them first. The choice is remembered.
 - **Just open the tabs** opens the pages without filling anything, as before.
 
 ### Fields filled by both
