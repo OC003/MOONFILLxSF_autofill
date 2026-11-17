@@ -11,6 +11,8 @@
   const RELOAD_FIRST = new Set([4]);
   // Pages that come pre-filled (Invite user, Fee manager): opened for reference, never filled.
   const ALWAYS_SKIPPED = new Set([1, 6]);
+  // The Plugin store page isn't needed for Access programmes: skipped without touching it.
+  const PLUGIN_PAGE = 3;
   const SYMBOL = { saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠' };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -129,8 +131,9 @@
       progress({ index: i, name: PAGES[i], status: 'working' });
       await open(i);
       let result;
-      if (ALWAYS_SKIPPED.has(i)) {
-        result = { status: 'skipped', message: 'Skipped: comes pre-filled.' };
+      const skip = ALWAYS_SKIPPED.has(i) ? 'comes pre-filled' : i === PLUGIN_PAGE && values.platformOffer === 'Access' ? 'not needed for Access' : null;
+      if (skip) {
+        result = { status: 'skipped', message: `Skipped: ${skip}.` };
         results.push({ name: PAGES[i], ...result });
         chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL.skipped }).catch(() => {});
         progress({ index: i, name: PAGES[i], status: result.status, message: result.message });

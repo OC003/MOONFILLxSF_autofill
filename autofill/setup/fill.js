@@ -377,9 +377,9 @@
       press(editor, 'Enter');
     } else if (editor.tagName === 'INPUT' || editor.tagName === 'TEXTAREA') {
       const option = () => agOptions().find(o => same(cleanText(o, NOISE), value));
-      if (agOptions().length && !option()) { setNative(editor, value); await sleep(300); }   // a searchable list
+      if (agOptions().length && !option()) { gridType(editor, value); await sleep(300); }   // a searchable list
       if (option()) clickLikeUser(option());
-      else { setNative(editor, value); press(editor, 'Enter'); }
+      else return agTypeAndCommit(index, colId, value, name, editor);
     } else {
       const option = await waitFor(() => agOptions().find(o => same(cleanText(o, NOISE), value)), 1500);
       if (!option) fail(`"${name}": option "${value}" isn't available. Options shown: ${agOptions().map(o => cleanText(o, NOISE)).join(', ') || 'none'}.`);
@@ -391,6 +391,51 @@
     if (!kept) fail(`"${name}" doesn't show "${value}" after editing the cell.`);
     commissionLog.push(`${name} set to "${value}"`);
     return true;
+  }
+
+  // Puts text into a grid editor's box without leaving it (leaving can end the edit before the value
+  // is in): the box's own value setter, then the input events a framework listens for.
+  function gridType(el, value) {
+    const win = el.ownerDocument.defaultView;
+    el.focus();
+    const proto = el.tagName === 'TEXTAREA' ? win.HTMLTextAreaElement : win.HTMLInputElement;
+    Object.getOwnPropertyDescriptor(proto.prototype, 'value').set.call(el, String(value));
+    el.dispatchEvent(new win.InputEvent('input', { bubbles: true, composed: true, data: String(value), inputType: 'insertText' }));
+    for (const type of ['keyup', 'change']) el.dispatchEvent(new win.Event(type, { bubbles: true }));
+  }
+
+  // A typed cell: tries the ways a grid finishes an edit (Enter, Tab, clicking away) until the cell
+  // shows the value. What each try left in the cell goes into the report if none works.
+  async function agTypeAndCommit(index, colId, value, name, firstEditor) {
+    const cellNow = () => agCell(index, colId);
+    const tries = [];
+    const reopen = async () => {
+      const cell = cellNow();
+      if (!cell) return null;
+      const win = cell.ownerDocument.defaultView;
+      if (agEditor(cell)) return agEditor(cell);
+      cell.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      return waitFor(() => agEditor(cellNow() || cell), 1500);
+    };
+    const ways = [
+      ['Enter', el => press(el, 'Enter')],
+      ['Tab', el => press(el, 'Tab')],
+      ['clicking away', el => { if (el.blur) el.blur(); clickLikeUser(doc().body); }]
+    ];
+    for (const [how, finish] of ways) {
+      const editor = tries.length ? await reopen() : firstEditor;
+      if (!editor) { tries.push(`${how}: the cell didn't open again`); continue; }
+      const kind = `${describeEl(editor)}${editor.type ? `[type=${editor.type}]` : ''}`;
+      gridType(editor, value);
+      const held = editor.value;
+      finish(editor);
+      await waitFor(() => { const c = cellNow(); return c && !editing(c); }, 1500);
+      const c = cellNow();
+      if (c && shownIn(c, value)) { commissionLog.push(`${name} set to "${value}" (${how})`); return true; }
+      tries.push(`${how} in ${kind} (box held "${held}"): cell shows "${c ? cleanText(c, NOISE) : '(gone)'}"`);
+    }
+    commissionLog.push(`${name}: ${tries.join('; ')}`);
+    fail(`"${name}" doesn't show "${value}" after editing the cell.`);
   }
 
   async function agCommission(v) {
@@ -620,7 +665,7 @@
     const page = pageFor();
     if (!page) {
       const path = root.location.pathname.replace(/\d{4,}/g, '#');
-      if (/authori[sz]e|login|\/idp\//i.test(path)) return { status: 'signin', message: `Awin's sign-in page is showing (${path}).`, login: /login/i.test(path) };
+      if (/authori[sz]e|login|signin|\/idp\/|\/oidc|\/sso|callback/i.test(path)) return { status: 'signin', message: `Awin's sign-in page is showing (${path}).`, login: /login/i.test(path) };
       return { status: 'failed', message: `This page isn't one of the setup pages (${path}).` };
     }
     const why = page.skip && page.skip(values);

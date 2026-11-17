@@ -345,7 +345,7 @@ test('after Save, an error on the page is reported as failed', async () => {
 // An ag-Grid like Awin's commission groups: headings with col-ids; cells only become editable after
 // "Edit Commission Groups", and then open an editor on double-click: a popup list for the two
 // dropdown columns, an inline box for Publisher Commission (Enter commits).
-function agGridPage({add = false, rows = 1} = {}) {
+function agGridPage({add = false, rows = 1, commitKey = 'Enter'} = {}) {
   const cols = [['name', 'Name'], ['desc', 'Description'], ['code', 'Group code'], ['txn', 'Transaction Type'], ['type', 'Commission Type'], ['rate', 'Publisher Commission']];
   const row = i => `<div class="ag-row" role="row" row-index="${i}">${cols.map(([id], c) => `<div class="ag-cell" role="gridcell" col-id="${id}" aria-colindex="${c + 1}">${id === 'name' ? 'Default' : ''}</div>`).join('')}</div>`;
   return awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
@@ -366,7 +366,7 @@ function agGridPage({add = false, rows = 1} = {}) {
        document.querySelector('.ag-popup-editor').addEventListener('click', ev => { const item = ev.target.closest('.ag-list-item'); if (!item) return; cell.textContent = item.textContent; cell.classList.remove('ag-cell-popup-editing'); ev.currentTarget.remove(); });
      } else if (id === 'rate') {
        cell.classList.add('ag-cell-inline-editing'); cell.innerHTML = '<input type="text" class="ag-input-field-input">';
-       cell.querySelector('input').addEventListener('keydown', ev => { if (ev.key === 'Enter') { const v = ev.target.value; cell.classList.remove('ag-cell-inline-editing'); cell.textContent = v + '%'; } });
+       cell.querySelector('input').addEventListener('keydown', ev => { if (ev.key === ${JSON.stringify(commitKey)}) { const v = ev.target.value; cell.classList.remove('ag-cell-inline-editing'); cell.textContent = v + '%'; } });
      }
    });`);
 }
@@ -398,6 +398,29 @@ test('commission groups (ag-Grid): if the cells already show these values, there
 test('tracking tag settings: no confirmation after Save, but no error either, counts as saved', async () => {
   const w = awin('/advertiser-mastertag/us/awin/123456/trackingtagsettings', '<p>Saved settings page</p>');
   assert.equal((await w.TCASetupFill.verifyPage(VALUES)).status, 'saved');
+});
+
+test('commission groups (ag-Grid): if Enter doesn\'t finish the edit, Tab is tried', async () => {
+  const w = agGridPage({commitKey: 'Tab'});
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(agValues(w)[2], '7.5%');
+  assert.match(result.message, /Publisher commission set to "7\.5" \(Tab\)/);
+});
+
+test('commission groups (ag-Grid): if no way of finishing the edit works, the report says what each try left', async () => {
+  const w = agGridPage({commitKey: 'none'});
+  Object.assign(w.TCASetupFill.T, {quietMax: 200});
+  const result = await fill(w);
+  assert.equal(result.status, 'failed');
+  assert.match(result.message, /"Publisher commission" doesn't show "7\.5"/);
+  assert.match(result.diagnostics, /Publisher commission: Enter in input\.ag-input-field-input\[type=text\] \(box held "7\.5"\): cell shows ""; Tab in /);
+});
+
+test('Awin\'s OIDC sign-in callbacks count as sign-in pages, so the run waits for them', async () => {
+  for (const path of ['/tracking-settings/en/awin/oidc', '/advertiser-mastertag/en/awin/oidc', '/backend/idpbackend/authorize']) {
+    assert.equal((await fill(awin(path, ''))).status, 'signin', path);
+  }
 });
 
 // ---------- Background runner ----------
@@ -493,6 +516,15 @@ test('runner: a page that never answers is given up on after the time limit, and
   for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
   assert.match(r.context.notified.message, /Advertiser settings: No result after 0 s\. If your Awin session has expired, sign in/);
   assert.equal(r.created.length, 10, 'the last page was still done');
+});
+
+test('runner: for Access, the Plugin store page is skipped without being touched', async () => {
+  const asked = [];
+  const r = runner((index, m) => { if (m.action === 'tcaSetupFill') { asked.push(index); return {status: 'filled', message: 'Filled.'}; } return {ok: true}; });
+  await r.start({action: 'tcaSetupRun', mid: '1', values: {...VALUES, platformOffer: 'Access'}, save: false});
+  for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
+  assert.deepEqual(asked, [0, 2, 4, 5, 7, 8, 9]);
+  assert.match(r.context.notified.message, /7 filled \(not saved\), 3 skipped/);
 });
 
 test('runner: gives up on pre-join after 5 attempts and says so', async () => {
