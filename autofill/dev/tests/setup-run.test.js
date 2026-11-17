@@ -706,6 +706,35 @@ test('form: Hide leaves a small box above the panel; clicking it brings back the
   window.close();
 });
 
+test('form: the pixel runner runs along the bar, then cheers (8+ worked), gives a thumbs up (3-7) or is sad (under 3)', async () => {
+  const ending = async done => {
+    const chrome = fakeChrome();
+    chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
+    const window = await record(chrome);
+    await window.TCASetupForm.open();
+    const ui = formRoot(window);
+    ui.querySelector('.run').click();
+    await tick(30);
+    const img = ui.querySelector('.progress .runner');
+    const mini = ui.querySelector('.mini .runner');
+    assert.equal(img.hidden, false);
+    assert.equal(img.getAttribute('src'), 'chrome-extension://test/assets/runner.gif', 'running while it works');
+    assert.equal(mini.getAttribute('src'), 'chrome-extension://test/assets/runner.gif', 'on the small box too');
+    chrome.listener({action: 'tcaSetupProgress', index: 4, status: 'saved'});
+    assert.match(img.style.left, /50%/, 'at the front of the bar (5 of 10)');
+    chrome.listener({action: 'tcaSetupProgress', done: true, summary: 'x', ...done});
+    const src = img.getAttribute('src');
+    window.close();
+    return src.replace('chrome-extension://test/assets/', '');
+  };
+  assert.equal(await ending({needsLook: 0}), 'runner-cheer.gif', '10 worked');
+  assert.equal(await ending({needsLook: 2}), 'runner-cheer.gif', '8 worked');
+  assert.equal(await ending({needsLook: 3}), 'runner-thumbs.gif', '7 worked');
+  assert.equal(await ending({needsLook: 7}), 'runner-thumbs.gif', '3 worked');
+  assert.equal(await ending({needsLook: 8}), 'runner-sad.gif', '2 worked');
+  assert.equal(await ending({cancelled: true}), 'runner-stand.gif');
+});
+
 test('form: the small box\'s ✕ cancels the run', async () => {
   const chrome = fakeChrome();
   const window = await record(chrome);

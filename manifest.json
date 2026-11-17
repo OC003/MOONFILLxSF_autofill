@@ -50,6 +50,6 @@
   "options_ui": { "page": "autofill/options.html", "open_in_tab": true },
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "web_accessible_resources": [
-    { "resources": ["autofill/options.html"], "matches": ["https://awin.lightning.force.com/*"] }
+    { "resources": ["autofill/options.html", "assets/runner.gif", "assets/runner-cheer.gif", "assets/runner-stand.gif", "assets/runner-sad.gif", "assets/runner-thumbs.gif"], "matches": ["https://awin.lightning.force.com/*"] }
   ]
 }

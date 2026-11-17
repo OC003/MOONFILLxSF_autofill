@@ -140,7 +140,7 @@ test('manifest: Moonfill entries unchanged; autofill added as its own content sc
   assert.deepEqual(manifest.content_scripts[2].matches, ['https://awin.lightning.force.com/*', 'file:///*/autofill/dev/mock/*.html*']);
   assert.ok(manifest.permissions.includes('storage'));
   assert.equal(manifest.options_ui.page, 'autofill/options.html');
-  assert.deepEqual(manifest.web_accessible_resources, [{resources: ['autofill/options.html'], matches: ['https://awin.lightning.force.com/*']}]);
+  assert.deepEqual(manifest.web_accessible_resources, [{resources: ['autofill/options.html', 'assets/runner.gif', 'assets/runner-cheer.gif', 'assets/runner-stand.gif', 'assets/runner-sad.gif', 'assets/runner-thumbs.gif'], matches: ['https://awin.lightning.force.com/*']}]);
 });
 
 test('settings: choices are applied over the team defaults; malformed or unknown ones are ignored', async () => {

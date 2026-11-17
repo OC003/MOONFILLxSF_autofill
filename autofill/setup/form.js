@@ -97,7 +97,13 @@
   button.primary { background: #0176d3; color: #fff; }
   button:disabled { opacity: .5; cursor: default; }
   button.link { border: 0; padding: 6px 4px; text-decoration: underline; margin-right: auto; }
-  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar-row { display: flex; align-items: flex-end; gap: 10px; }
+  /* The pixel runner rides along the front of the progress bar. */
+  .track { position: relative; flex: 1; padding-top: 46px; }
+  .track .bar { width: 100%; }
+  .runner { position: absolute; bottom: 8px; left: 0; width: 36px; height: 44px; image-rendering: pixelated; transform: translateX(-50%); transition: left .4s ease-out; pointer-events: none; }
+  .mini .track { padding-top: 24px; }
+  .mini .runner { width: 18px; height: 22px; bottom: 5px; }
   .bar { flex: 1; height: 10px; background: #e5e5e5; border-radius: 5px; overflow: hidden; }
   .fill { height: 100%; width: 0; background: #0176d3; border-radius: 5px; transition: width .3s; }
   .done .fill { background: #2e844a; }
@@ -172,7 +178,7 @@
     </form>
     <div class="progress" hidden>
       <div class="bar-row">
-        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div>
+        <div class="track"><img class="runner" alt="" hidden><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div></div>
         <span class="count">0 / 10</span>
         <button type="button" class="stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
       </div>
@@ -191,7 +197,7 @@
     <button type="button" class="stop mini-stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
     <button type="button" class="dismiss" title="Dismiss" aria-label="Dismiss" hidden>×</button>
   </div>
-  <div class="bar"><div class="fill mini-fill"></div></div>
+  <div class="track"><img class="runner mini-runner" alt="" hidden><div class="bar"><div class="fill mini-fill"></div></div></div>
 </div>`;
   const $ = sel => shadow.querySelector(sel);
   let mid = '';
@@ -290,7 +296,24 @@
     setBar(0);
   }
 
+  // The runner: running while the setup works. At the end, by how many of the 10 pages worked (saved,
+  // filled or skipped as intended): 8 or more cheers, 3 to 7 thumbs up, fewer than 3 is sad. Cancelled,
+  // or couldn't run: it stands still. It sits at the front of the bar (never off its ends).
+  const ending = worked => (worked >= 8 ? 'cheer' : worked >= 3 ? 'thumbs' : 'sad');
+  const sprite = name => { try { return chrome.runtime.getURL(`assets/runner${name}.gif`); } catch { return ''; } };
+  function runner(state, n) {
+    for (const img of shadow.querySelectorAll('.runner')) {
+      const src = sprite(state === 'run' ? '' : `-${state}`);
+      if (src && img.getAttribute('src') !== src) img.src = src;
+      img.hidden = !src;
+      img.dataset.state = state;
+      const half = img.classList.contains('mini-runner') ? 9 : 18;
+      if (n !== undefined) img.style.left = `clamp(${half}px, ${(n / PAGES.length) * 100}%, calc(100% - ${half}px))`;
+    }
+  }
+
   function setBar(n) {
+    runner(running ? 'run' : shadow.querySelector('.runner').dataset.state || 'run', n);
     $('.fill').style.width = `${(n / PAGES.length) * 100}%`;
     $('.mini-fill').style.width = `${(n / PAGES.length) * 100}%`;
     $('.bar').setAttribute('aria-valuenow', String(n));
@@ -331,6 +354,7 @@
       $('.close').textContent = 'Close';
       $('.progress').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
       if (!update.cancelled) setBar(PAGES.length);
+      runner(update.cancelled || update.error ? 'stand' : ending(PAGES.length - (update.needsLook || 0)));
       return;
     }
     const li = shadow.querySelector(`li[data-index="${update.index}"]`);
