@@ -107,6 +107,26 @@
       || (scope !== doc().body && all(scope, 'input[type="text"], input:not([type])').filter(free).filter(el => !/search|filter/i.test(`${el.name} ${el.placeholder} ${el.className}`)).pop());
     return box ? { el: box, editor: null, kind: box.tagName === 'TEXTAREA' ? 'text box' : box.isContentEditable ? 'editable box' : 'single-line text box' } : null;
   }
+  // The box titled "Set-up" in the plugin's settings: where the code goes.
+  const EDITOR_WRAP = EDITORS.map(([wrap]) => wrap).join(', ');
+  function setupBox() {
+    for (const title of ['Set-up', 'Setup', 'Set up']) {
+      const label = labelElement(title);
+      const el = label && controlAfter(label, `${EDITOR_WRAP}, textarea, [contenteditable="true"], input[type="text"], input:not([type])`);
+      if (!el) continue;
+      const wrap = closest(el, EDITOR_WRAP);
+      if (wrap) {
+        const [, input, kind] = EDITORS.find(([w]) => wrap.matches(w));
+        const inner = all(wrap, input)[0];
+        if (inner) return { el: inner, editor: wrap, kind: `"${title}" ${kind} editor` };
+      }
+      if (el.disabled || el.readOnly) continue;
+      return { el, editor: null, kind: `"${title}" ${el.tagName === 'TEXTAREA' ? 'text box' : el.isContentEditable ? 'editable box' : 'single-line text box'}` };
+    }
+    return null;
+  }
+  const findCodeBox = () => setupBox() || codeBox(pluginScope || doc().body) || codeBox(doc().body);
+
   const squash = text => String(text ?? '').replace(/[\s\u00a0\u200b]+/g, '');
   const codeShown = box => squash(box.editor ? cleanText(box.editor, NOISE) || box.el.value : box.el.isContentEditable ? box.el.textContent : box.el.value).includes(squash(PLUGIN.code));
 
@@ -221,6 +241,41 @@
 
   const append = v => (v.platformOffer === 'Access' ? PLATFORM_APPEND.Access : PLATFORM_APPEND.other);
 
+  // ---------- Commission groups: a table of boxes ----------
+
+  const BOX = `${TRIGGER}, input:not([type="hidden"]), textarea, [contenteditable="true"]`;
+  const ROW = 'tr, [role="row"], .ag-row, .row, .grid-row';
+  const CELL = 'td, th, [role="gridcell"], [role="cell"], .ag-cell';
+  // The cells of a row that hold a box, in order, each with its main control (a dropdown first).
+  function boxCells(row) {
+    const cells = all(row, CELL).filter(c => closest(c.parentElement, ROW) === row || c.parentElement === row);
+    const list = (cells.length ? cells : [...row.children]).filter(visible);
+    return list.map(cell => ({ cell, el: all(cell, TRIGGER).filter(visible)[0] || all(cell, BOX).filter(visible)[0] })).filter(c => c.el);
+  }
+  // The row to fill: one with at least six boxes; if several, the one whose sixth box is still empty.
+  function commissionRow() {
+    const rows = shown(ROW).filter(r => !inSwitcher(r) && boxCells(r).length >= 6 && !shown(ROW).some(inner => inner !== r && r.contains(inner) && boxCells(inner).length >= 6));
+    if (rows.length < 2) return rows[0] || null;
+    return rows.find(r => { const sixth = boxCells(r)[5].el; return 'value' in sixth && sixth.value === ''; }) || rows[rows.length - 1];
+  }
+  // Transaction Type, Commission Type, Publisher Commission: by their column headings when the
+  // table has them, otherwise boxes 4, 5 and 6 of the row.
+  function commissionBoxes(row) {
+    const cells = boxCells(row);
+    const table = closest(row, 'table, [role="grid"], [role="table"], .ag-root');
+    const heads = table ? all(table, 'th, [role="columnheader"], .ag-header-cell').filter(visible) : [];
+    const rowCells = all(row, CELL).filter(c => closest(c.parentElement, ROW) === row || c.parentElement === row).filter(visible);
+    const byHeading = ['Transaction Type', 'Commission Type', 'Publisher Commission'].map(text => {
+      const i = heads.findIndex(h => same(cleanText(h, NOISE), text));
+      const cell = i >= 0 && heads.length === rowCells.length ? rowCells[i] : null;
+      return cell && cells.find(c => c.cell === cell);
+    });
+    const picked = byHeading.every(Boolean) ? byHeading : cells.slice(3, 6);
+    const [t, c, p] = picked.map(x => x && x.el);
+    const rate = p && (p.matches('input, textarea, [contenteditable="true"]') ? p : all(p.parentElement, 'input:not([type="hidden"])')[0]);
+    return [t, c, rate];
+  }
+
   let pluginScope = null;   // the plugin menu, once open
 
   // Page 1's fields: by id (from the page check), or by label if the id differs.
@@ -266,19 +321,22 @@
     { key: 'invite', name: 'Invite user', match: /\/settings\/invite-user/, skip: () => 'comes pre-filled' },
     {
       key: 'commission', name: 'Commission groups', match: /\/commission-manager\/.*\/commission-groups/,
+      // A table: column headings on top, a row of boxes underneath. In that row, boxes 1–3 are left
+      // alone and boxes 4, 5, 6 are Transaction Type, Commission Type and Publisher Commission.
+      // The row appears after clicking "Add Default Commission Group".
       async fill(v) {
-        // The fields appear once "Add Default Commission Group" (or, on an existing programme,
-        // "Edit Commission Groups") has been clicked.
-        await waitFor(() => labelElement('Transaction Type') || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
+        await waitFor(() => commissionRow() || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
         for (const name of ['Add Default Commission Group', 'Edit Commission Groups']) {
-          if (labelElement('Transaction Type')) break;
+          if (commissionRow()) break;
           const open = button(name);
-          if (open) { clickLikeUser(open); await waitFor(() => labelElement('Transaction Type'), 8000); }
+          if (open) { clickLikeUser(open); await waitFor(commissionRow, 8000); await sleep(500); }
         }
-        if (!labelElement('Transaction Type')) fail('"Transaction Type" not found on the page, even after clicking Add Default Commission Group.');
-        await choose(fieldByLabel('Transaction Type', TRIGGER), v.transactionType, 'Transaction Type');
-        await choose(fieldByLabel('Commission Type', TRIGGER), v.commissionType, 'Commission Type');
-        await setText(fieldByLabel('Publisher Commission', 'input:not([type="hidden"]), [contenteditable="true"]'), v.publisherCommission, 'Publisher commission');
+        const row = commissionRow();
+        if (!row) fail('The row of commission boxes didn\'t appear after clicking Add Default Commission Group.');
+        const [transaction, commission, rate] = commissionBoxes(row);
+        await choose(transaction, v.transactionType, 'Transaction Type');
+        await choose(commission, v.commissionType, 'Commission Type');
+        await setText(rate, v.publisherCommission, 'Publisher commission');
       },
       save: () => button(['Save', 'Save changes', 'Update', 'Confirm'])
     },
@@ -296,14 +354,14 @@
         // The plugin's settings (with the code box) are drawn after the plugin is chosen.
         pluginScope = closest(dropdown, '[role="dialog"], .modal-content, .modal, form, .panel, .card, section') || doc().body;
         await sleep(1000);
-        const box = await waitFor(() => codeBox(pluginScope) || codeBox(doc().body), 5000);
+        const box = await waitFor(findCodeBox, 8000);
         if (!box) fail('The plugin\'s code box wasn\'t found after choosing the plugin.');
         typeCode(box, PLUGIN.code);
         // The page sometimes redraws the form just after: check the code is still there, and retype once.
         await sleep(1000);
-        const again = codeBox(pluginScope) || codeBox(doc().body);
+        const again = findCodeBox();
         if (!again || !codeShown(again)) { if (again) typeCode(again, PLUGIN.code); await sleep(500); }
-        const now = codeBox(pluginScope) || codeBox(doc().body);
+        const now = findCodeBox();
         if (!now || !codeShown(now)) fail(`The plugin code didn't stay in the ${box.kind} (${describeBox(now || box)}).`);
         return { note: `Code typed into: ${describeBox(now)}.` };
       },

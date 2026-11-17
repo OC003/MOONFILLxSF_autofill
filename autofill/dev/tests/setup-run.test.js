@@ -98,43 +98,6 @@ const dropdownScript = `document.addEventListener('click', e => {
   if (option) { const list = option.parentElement; list.previousElementSibling.querySelector('.ng-value').textContent = option.textContent; list.hidden = true; }
 });`;
 
-test('commission groups: opens the edit view, then fills the two custom dropdowns and the commission by their labels', async () => {
-  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
-    <button type="submit" class="btn edit-table" id="edit">Edit Commission Groups</button>
-    <div id="editor" hidden>${customDropdown('Transaction Type', ['Sale', 'Lead'])}${customDropdown('Commission Type', ['Fixed', 'Percentage'])}
-      <div class="field"><label>Publisher Commission</label><input type="text" class="rate"></div><button type="button">Save</button></div>`,
-  `${dropdownScript} document.getElementById('edit').addEventListener('click', () => { document.getElementById('editor').hidden = false; });`);
-  const result = await fill(w);
-  assert.equal(result.status, 'filled', result.message);
-  const values = [...w.document.querySelectorAll('.ng-value')].map(v => v.textContent);
-  assert.deepEqual(values, ['Sale', 'Percentage']);
-  assert.equal(w.document.querySelector('.rate').value, '7.5');
-});
-
-test('commission groups on a new programme: clicks "Add Default Commission Group" to show the fields', async () => {
-  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
-    <button type="button" class="btn" id="add">Add Default Commission Group</button>
-    <div id="editor" hidden>${customDropdown('Transaction Type', ['Sale', 'Lead'])}${customDropdown('Commission Type', ['Fixed', 'Percentage'])}
-      <div class="field"><label>Publisher Commission</label><input type="text" class="rate"></div><button type="button">Save</button></div>`,
-  `${dropdownScript} document.getElementById('add').addEventListener('click', () => { document.getElementById('editor').hidden = false; window.added = (window.added || 0) + 1; });`);
-  const result = await fill(w);
-  assert.equal(result.status, 'filled', result.message);
-  assert.equal(w.added, 1, 'clicked once');
-  assert.deepEqual([...w.document.querySelectorAll('.ng-value')].map(v => v.textContent), ['Sale', 'Percentage']);
-  assert.equal(w.document.querySelector('.rate').value, '7.5');
-});
-
-test('commission groups: the add button can be a link with a "+" in front', async () => {
-  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
-    <a href="#" id="add"><i class="icon-plus"></i> + Add Default Commission Group</a>
-    <div id="editor" hidden>${customDropdown('Transaction Type', ['Sale', 'Lead'])}${customDropdown('Commission Type', ['Fixed', 'Percentage'])}
-      <div class="field"><label>Publisher Commission</label><input type="text" class="rate"></div></div>`,
-  `${dropdownScript} document.getElementById('add').addEventListener('click', e => { e.preventDefault(); document.getElementById('editor').hidden = false; });`);
-  const result = await fill(w);
-  assert.equal(result.status, 'filled', result.message);
-  assert.equal(w.document.querySelector('.rate').value, '7.5');
-});
-
 test('plugin store: a single-line text box in the plugin menu takes the code, and the result says which box', async () => {
   const w = awin('/advertiser-mastertag/us/awin/123456/plugins', `
     <input type="text" placeholder="Search plugins" class="search">
@@ -149,9 +112,37 @@ test('plugin store: a single-line text box in the plugin menu takes the code, an
   assert.match(result.message, /Code typed into: single-line text box input#snippet "Custom code"\./);
 });
 
+// Commission groups as on Awin: a table with column headings and, once "Add Default Commission Group"
+// is clicked, a row of six boxes: three left alone, then Transaction Type, Commission Type, Publisher Commission.
+const box = (kind, options = []) => kind === 'text' ? '<input type="text">'
+  : `<div class="ng-select" tabindex="0"><div class="ng-value">Choose</div></div><ul class="ng-dropdown" hidden>${options.map(o => `<li role="option" class="ng-option">${o}</li>`).join('')}</ul>`;
+function commissionPage({headings = ['Name', 'Description', 'Group code', 'Transaction Type', 'Commission Type', 'Publisher Commission'], add = '<button type="button" id="add">Add Default Commission Group</button>', transaction = ['Sale', 'Lead'], grid = false} = {}) {
+  const cells = [box('text'), box('text'), box('text'), box('select', transaction), box('select', ['Fixed', 'Percentage']), box('text')];
+  const table = grid
+    ? `<div role="grid"><div role="row">${headings.map(h => `<div role="columnheader">${h}</div>`).join('')}</div><div role="row" id="new" hidden>${cells.map(c => `<div role="gridcell">${c}</div>`).join('')}</div></div>`
+    : `<table><thead><tr>${headings.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody><tr id="new" hidden>${cells.map(c => `<td>${c}</td>`).join('')}</tr></tbody></table>`;
+  return awin('/commission-manager/us/awin/merchant/123456/commission-groups', `${add}${table}<button type="button" onclick="window.saved = true">Save</button>`,
+    `${dropdownScript} document.getElementById('add').addEventListener('click', e => { e.preventDefault(); document.getElementById('new').hidden = false; window.added = (window.added || 0) + 1; });`);
+}
+const rowValues = w => [...w.document.querySelectorAll('#new input[type="text"]')].map(i => i.value).concat([...w.document.querySelectorAll('#new .ng-value')].map(v => v.textContent));
+
+test('commission groups: clicks Add Default Commission Group (even though the headings already show), then fills boxes 4, 5 and 6', async () => {
+  const w = commissionPage();
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.added, 1);
+  assert.deepEqual(rowValues(w), ['', '', '', '7.5', 'Sale', 'Percentage'], 'boxes 1–3 left alone');
+});
+
+test('commission groups: works by position when the headings are named differently, in a grid made of divs, with a "+" link', async () => {
+  const w = commissionPage({headings: ['A', 'B', 'C', 'Type', 'Kind', 'Rate'], grid: true, add: '<a href="#" id="add">+ Add Default Commission Group</a>'});
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.deepEqual(rowValues(w), ['', '', '', '7.5', 'Sale', 'Percentage']);
+});
+
 test('a missing option stops the page with a clear message, and nothing is saved', async () => {
-  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `${customDropdown('Transaction Type', ['Lead'])}${customDropdown('Commission Type', ['Fixed'])}
-    <label>Publisher Commission <input type="text"></label><button type="button" onclick="window.saved = true">Save</button>`, dropdownScript);
+  const w = commissionPage({transaction: ['Lead']});
   const result = await fill(w, VALUES, true);
   assert.equal(result.status, 'failed');
   assert.match(result.message, /"Transaction Type": option "Sale" didn't appear/);
@@ -190,6 +181,22 @@ test('plugin store: the code goes into a code editor (CodeMirror-style), and is 
   const result = await fill(w);
   assert.equal(result.status, 'filled', result.message);
   assert.equal(w.document.querySelector('.CodeMirror-code').textContent, 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};');
+});
+
+test('plugin store: the code goes into the box titled "Set-up", not another box in the menu', async () => {
+  const w = awin('/advertiser-mastertag/us/awin/123456/plugins', `
+    <a class="btn" id="add">Add Plugin</a>
+    <div class="modal" id="menu" hidden><select><option>Choose…</option><option>R.O.EYE - Consent - SingleView</option></select>
+      <div class="block"><h4>Set-up</h4><div class="CodeMirror"><textarea></textarea><div class="CodeMirror-code"></div></div></div>
+      <div class="block"><h4>Notes</h4><textarea class="notes"></textarea></div>
+      <button type="button">Save</button></div>`,
+  `document.addEventListener('input', e => { const cm = e.target.closest('.CodeMirror'); if (cm) cm.querySelector('.CodeMirror-code').textContent = e.target.value; });
+   document.getElementById('add').addEventListener('click', () => { document.getElementById('menu').hidden = false; });`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.document.querySelector('.CodeMirror-code').textContent, 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};');
+  assert.equal(w.document.querySelector('.notes').value, '', 'the other box is left alone');
+  assert.match(result.message, /Code typed into: "Set-up" CodeMirror editor/);
 });
 
 test('tracking tag settings: the dropdown offering "Conversion Tag and Image Pixel integrated" is set', async () => {
