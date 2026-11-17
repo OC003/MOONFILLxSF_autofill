@@ -13,6 +13,21 @@
   const ERROR = '.alert-danger, .alert-error, .error-message, .toast-error, .notification-error, [role="alert"].error';
   const SUCCESS = '.alert-success, .toast-success, .notification-success';
 
+  // Timings (ms). quiet: how long the page must stop changing before it counts as loaded.
+  const T = { quiet: 2000, quietMax: 25000, recheck: 2500 };
+
+  // Waits until the page has stopped changing (its data has arrived and been drawn), or quietMax.
+  function settled() {
+    return new Promise(resolve => {
+      let timer;
+      const observer = new root.MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, T.quiet); });
+      const done = () => { observer.disconnect(); clearTimeout(cap); resolve(); };
+      const cap = setTimeout(done, T.quietMax);
+      observer.observe(doc().documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      timer = setTimeout(done, T.quiet);
+    });
+  }
+
   class SetupError extends Error {}
   const fail = message => { throw new SetupError(message); };
 
@@ -87,8 +102,10 @@
       const el = editor && all(editor, input)[0];
       if (el) return { el, editor, kind };
     }
-    const box = all(scope, 'textarea, [contenteditable="true"]').filter(visible).filter(el => !inSwitcher(el)).pop();
-    return box ? { el: box, editor: null, kind: box.tagName === 'TEXTAREA' ? 'text box' : 'editable box' } : null;
+    const free = el => visible(el) && !inSwitcher(el) && !el.disabled && !el.readOnly;
+    const box = all(scope, 'textarea, [contenteditable="true"]').filter(free).pop()
+      || (scope !== doc().body && all(scope, 'input[type="text"], input:not([type])').filter(free).filter(el => !/search|filter/i.test(`${el.name} ${el.placeholder} ${el.className}`)).pop());
+    return box ? { el: box, editor: null, kind: box.tagName === 'TEXTAREA' ? 'text box' : box.isContentEditable ? 'editable box' : 'single-line text box' } : null;
   }
   const squash = text => String(text ?? '').replace(/[\s\u00a0\u200b]+/g, '');
   const codeShown = box => squash(box.editor ? cleanText(box.editor, NOISE) || box.el.value : box.el.isContentEditable ? box.el.textContent : box.el.value).includes(squash(PLUGIN.code));
@@ -109,6 +126,14 @@
       if (el.isContentEditable) el.textContent = code;
       else setNative(el, code);
     }
+  }
+
+  // A short description of a box, to show in the run's results.
+  function describeBox(box) {
+    const el = box.editor || box.el;
+    const label = (el.labels && el.labels[0] && cleanText(el.labels[0], NOISE)) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+    const name = el.id ? `#${el.id}` : el.getAttribute('name') ? `[name=${el.getAttribute('name')}]` : el.className ? `.${String(el.className).trim().split(/\s+/)[0]}` : '';
+    return `${box.kind} ${el.tagName.toLowerCase()}${name}${label ? ` "${label.slice(0, 40)}"` : ''}`;
   }
 
   function ensureChecked(el, name) {
@@ -163,11 +188,19 @@
     fail(`No dropdown on the page offers "${option}".`);
   }
 
+  // A visible button or link by its text. Leading symbols ("+ Add…") are ignored; an exact match wins,
+  // otherwise the shortest one containing the text (for multi-word labels only).
   function button(texts, scope = doc().body) {
     const wanted = [].concat(texts).map(norm);
-    return all(scope, 'button, input[type="submit"], input[type="button"], a.btn, a.button, [role="button"]').filter(visible)
-      .filter(b => !closest(b, '#tca-setup-root') && !inSwitcher(b))
-      .find(b => wanted.includes(norm(cleanText(b, NOISE) || b.value))) || null;
+    const words = b => norm(cleanText(b, NOISE) || b.value || b.getAttribute('aria-label') || b.title).replace(/^[^a-z0-9]+/, '');
+    const candidates = all(scope, 'button, input[type="submit"], input[type="button"], a, [role="button"], [role="link"]').filter(visible)
+      .filter(b => !closest(b, '#tca-setup-root') && !inSwitcher(b));
+    for (const want of wanted) {
+      const exact = candidates.find(b => words(b) === want);
+      if (exact) return exact;
+    }
+    const partial = candidates.filter(b => wanted.some(w => w.includes(' ') && words(b).includes(w)));
+    return partial.sort((a, b) => words(a).length - words(b).length)[0] || null;
   }
 
   async function clickSave(el, name) {
@@ -211,10 +244,18 @@
         await waitFor(() => !missing().length, 15000);
         if (missing().length) fail(`${missing().map(l => `"${l}"`).join(', ')} not found on the page (waited 15 s for it to load).`);
         const values = trackingValues(v);
-        for (const [id, label, kind] of TRACKING) {
-          if (kind === 'text') await setText(trackingField(id, label, kind), values[id], label);
-          else ensureChecked(trackingField(id, label, kind), label);
-        }
+        const write = async () => {
+          for (const [id, label, kind] of TRACKING) {
+            if (kind === 'text') await setText(trackingField(id, label, kind), values[id], label);
+            else ensureChecked(trackingField(id, label, kind), label);
+          }
+        };
+        await write();
+        // If the page loads its saved settings over ours, write them again once.
+        await sleep(T.recheck);
+        if (!this.verify(v).every(Boolean)) { await settled(); await write(); await sleep(T.recheck); }
+        const wrong = TRACKING.filter((f, i) => !this.verify(v)[i]).map(([, label]) => label);
+        if (wrong.length) fail(`${wrong.join(', ')} kept changing back after being filled.`);
       },
       save: () => button('Save'),
       verify: v => {
@@ -263,7 +304,8 @@
         const again = codeBox(pluginScope) || codeBox(doc().body);
         if (!again || !codeShown(again)) { if (again) typeCode(again, PLUGIN.code); await sleep(500); }
         const now = codeBox(pluginScope) || codeBox(doc().body);
-        if (!now || !codeShown(now)) fail(`The plugin code didn't stay in the ${box.kind}.`);
+        if (!now || !codeShown(now)) fail(`The plugin code didn't stay in the ${box.kind} (${describeBox(now || box)}).`);
+        return { note: `Code typed into: ${describeBox(now)}.` };
       },
       save: () => button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], pluginScope || doc().body)
     },
@@ -345,10 +387,12 @@
     const why = page.skip && page.skip(values);
     if (why) return { status: 'skipped', message: `Skipped: ${why}.`, page: page.key };
     try {
+      await settled();
       const early = await page.fill(values);
-      if (early) return { ...early, page: page.key };
-      if (!save) return { status: 'filled', message: 'Filled, not saved: check it, then save it yourself.', page: page.key };
-      return { ...(await clickSave(page.save(), 'Save')), page: page.key };
+      const note = early && early.note;
+      if (early && early.status) return { ...early, page: page.key };
+      if (!save) return { status: 'filled', message: `Filled, not saved: check it, then save it yourself.${note ? ' ' + note : ''}`, page: page.key, note };
+      return { ...(await clickSave(page.save(), 'Save')), page: page.key, note };
     } catch (error) {
       return { status: 'failed', message: error instanceof SetupError ? error.message : `Unexpected error: ${error.message}`, page: page.key, diagnostics: diagnostics() };
     }
@@ -382,7 +426,7 @@
     doc().title = `${symbol} ${doc().title.replace(/^[✓⚠⏭✎] /, '')}`;
   }
 
-  root.TCASetupFill = { PAGES, PLATFORM_APPEND, PLUGIN, PUBLISHERS, fillPage, verifyPage, pageFor, mark };
+  root.TCASetupFill = { T, PAGES, PLATFORM_APPEND, PLUGIN, PUBLISHERS, fillPage, verifyPage, pageFor, mark };
 
   if (root.top !== root || !root.chrome || !root.chrome.runtime || !root.chrome.runtime.onMessage) return;
   root.chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

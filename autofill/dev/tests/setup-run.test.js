@@ -23,6 +23,7 @@ function awin(path, body, script = '') {
     ${body}<script>${script}</script></body>`, {url: `https://ui.awin.com${path}`, runScripts: 'dangerously', pretendToBeVisual: true});
   const {window} = dom;
   for (const f of ['config.js', 'engine.js', 'setup/fill.js']) window.eval(read(f));
+  Object.assign(window.TCASetupFill.T, {quiet: 30, quietMax: 1500, recheck: 60});
   return window;
 }
 const fill = (w, values = VALUES, save = false) => w.TCASetupFill.fillPage(values, save);
@@ -64,6 +65,19 @@ test('tracking settings: waits for a new programme\'s form to appear, and finds 
   const $ = id => w.document.getElementById(id);
   assert.deepEqual([$('w').value, $('l').value, $('q').value, $('d').checked, $('r').checked],
     [VALUES.websiteUrl, VALUES.landingPage, 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!', true, true]);
+});
+
+test('tracking settings: if the page loads its saved settings over the typed values, they are typed again', async () => {
+  const w = awin('/tracking-settings/us/awin/advertiser/123456/main-settings', `<input id="MainWebsiteURL"><input id="GlobalClickThroughPage"><input id="ClickAppend">
+    <input type="checkbox" id="DeeplinkEnabled"><input type="checkbox" id="NoDomainDeeplink">`,
+  `let late = true; document.addEventListener('input', () => {
+     if (!late) return; late = false;
+     setTimeout(() => { for (const id of ['MainWebsiteURL', 'GlobalClickThroughPage', 'ClickAppend']) document.getElementById(id).value = 'from the server'; }, 20);
+   });`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.document.getElementById('MainWebsiteURL').value, VALUES.websiteUrl);
+  assert.equal(w.document.getElementById('ClickAppend').value, 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!');
 });
 
 test('pages that come pre-filled are skipped, and the plugin is skipped for Access', async () => {
@@ -108,6 +122,31 @@ test('commission groups on a new programme: clicks "Add Default Commission Group
   assert.equal(w.added, 1, 'clicked once');
   assert.deepEqual([...w.document.querySelectorAll('.ng-value')].map(v => v.textContent), ['Sale', 'Percentage']);
   assert.equal(w.document.querySelector('.rate').value, '7.5');
+});
+
+test('commission groups: the add button can be a link with a "+" in front', async () => {
+  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
+    <a href="#" id="add"><i class="icon-plus"></i> + Add Default Commission Group</a>
+    <div id="editor" hidden>${customDropdown('Transaction Type', ['Sale', 'Lead'])}${customDropdown('Commission Type', ['Fixed', 'Percentage'])}
+      <div class="field"><label>Publisher Commission</label><input type="text" class="rate"></div></div>`,
+  `${dropdownScript} document.getElementById('add').addEventListener('click', e => { e.preventDefault(); document.getElementById('editor').hidden = false; });`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.document.querySelector('.rate').value, '7.5');
+});
+
+test('plugin store: a single-line text box in the plugin menu takes the code, and the result says which box', async () => {
+  const w = awin('/advertiser-mastertag/us/awin/123456/plugins', `
+    <input type="text" placeholder="Search plugins" class="search">
+    <a class="btn" id="add">Add Plugin</a>
+    <form class="modal" id="menu" hidden><select><option>Choose…</option><option>R.O.EYE - Consent - SingleView</option></select>
+      <label for="snippet">Custom code</label><input type="text" id="snippet"><button type="button" id="save">Save</button></form>`,
+  `document.getElementById('add').addEventListener('click', () => { document.getElementById('menu').hidden = false; });`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.document.getElementById('snippet').value, 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};');
+  assert.equal(w.document.querySelector('.search').value, '', 'the search box is left alone');
+  assert.match(result.message, /Code typed into: single-line text box input#snippet "Custom code"\./);
 });
 
 test('a missing option stops the page with a clear message, and nothing is saved', async () => {

@@ -6,7 +6,7 @@
 (function () {
   const PAGES = ['Tracking settings', 'Invite user', 'Commission groups', 'Plugin store', 'Tracking tag settings',
     'Account details', 'Fee manager', 'Mobile tracking', 'Advertiser settings', 'Pre-join publishers'];
-  const T = { load: 30000, settle: 1500, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000 };
+  const T = { load: 30000, settle: 4000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000 };
   // Pages reloaded before filling (by position): Tracking tag settings often doesn't load fully first time.
   const RELOAD_FIRST = new Set([4]);
   const SYMBOL = { saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠' };
@@ -79,6 +79,7 @@
       await waitAfterSave(tabId);
       await sleep(T.settle);
       result = { ...(await ask(tabId, { action: 'tcaSetupVerify', values })), attempts: attempt };
+      if (filled.note) result.message = `${result.message} ${filled.note}`;
       // Only Pre-join publishers is retried: it often shows an error on the first try.
       if (result.status !== 'failed' || filled.page !== 'prejoin') return result;
       if (attempt < T.retries) await sleep(T.retryWait);

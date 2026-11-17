@@ -176,7 +176,8 @@
     if (!li) return;
     li.dataset.status = update.status;
     li.querySelector('.icon').textContent = ICON[update.status] || '·';
-    li.querySelector('.msg').textContent = update.status === 'working' ? 'working…' : update.status === 'saved' ? '' : `— ${update.message || ''}${update.diagnostics ? ` (${update.diagnostics})` : ''}`;
+    const note = update.message && /Code typed into/.test(update.message) ? update.message.slice(update.message.indexOf('Code typed into')) : '';
+    li.querySelector('.msg').textContent = update.status === 'working' ? `${update.message || 'working'}…` : update.status === 'saved' ? (note ? `— ${note}` : '') : `— ${update.message || ''}${update.diagnostics ? ` (${update.diagnostics})` : ''}`;
   }
 
   const close = () => { $('.backdrop').hidden = true; };
