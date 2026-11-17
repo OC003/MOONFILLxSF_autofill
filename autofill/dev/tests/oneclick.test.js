@@ -91,7 +91,8 @@ const stored = (mock, iso) => (mock === 'lightning' ? iso : iso.split('-').rever
 
 const key = (window, label, where = 'Technical Checklist') => {
   const rec = window.mockRecord;
-  return rec[`${where}::${label}`] ?? rec[`${where === 'Technical Checklist' ? 'TC' : 'CC'}::${label}`];
+  const code = {'Technical Checklist': 'TC', 'SingleView Setup': 'SV', 'Commercial Checklist': 'CC'}[where];
+  return rec[`${where}::${label}`] ?? rec[`${code}::${label}`];
 };
 
 test('extension field list is generated from the captured specification', async () => {
@@ -699,3 +700,32 @@ test('"Clear checklist" with Fill & save asks first; cancelling changes nothing'
   assert.equal(ui.querySelector('.status').dataset.state, undefined);
 });
 
+
+// ---------- SingleView Setup (Accelerate / Advanced) ----------
+
+test('lightning: for an Advanced programme, Fill & save also sets SingleView Setup (MasterTag Enabled, New)', async () => {
+  const window = await open('lightning', 'advanced');
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  assert.equal(key(window, 'SingleView Setup Type', 'SingleView Setup'), 'MasterTag Enabled');
+  assert.equal(key(window, 'SingleView Integration Status', 'SingleView Setup'), 'New');
+  assert.equal(key(window, 'Server to server'), 'Yes', 'the Technical Checklist is filled as usual');
+  assert.equal(key(window, 'Img tag implemented', 'Commercial Checklist'), 'No', 'other checklists stay');
+  assert.match(status.textContent, /Advanced: SingleView Setup set too\./);
+});
+
+test('lightning: for Access, SingleView Setup is left alone', async () => {
+  const window = await open('lightning');
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  assert.ok(!key(window, 'SingleView Setup Type', 'SingleView Setup'));
+  assert.ok(!key(window, 'SingleView Integration Status', 'SingleView Setup'));
+});
+
+test('engine: an optional field in a section the record doesn\'t have is skipped with a note', async () => {
+  const window = await open('native');
+  const fields = [...window.TCA_FIELDS, {label: 'SingleView Setup Type', value: 'MasterTag Enabled', excluded: false, section: 'SingleView Setup', optional: true}];
+  const result = await window.TCAEngine.run(window.document, window.TCA_CONFIG, fields, {mode: 'save'});
+  assert.equal(result.status, 'saved', result.message);
+  assert.match(result.message, /No "SingleView Setup" section found, so its fields were left as they are\./);
+});

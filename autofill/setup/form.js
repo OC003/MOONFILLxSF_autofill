@@ -1,8 +1,8 @@
-// Programme setup, stage 3 (Salesforce side): clicking Moonfill's 🚀 New Implementation button opens
-// this form instead of the bare tabs. The TC checks the values read from the record and the client's
-// site, answers the rest, and presses Run setup; the background script then fills and saves the pages
-// one by one (setup/background.js), and progress shows here. Moonfill's own code is unchanged: its
-// button's click is caught first, in the capture phase. "Just open the tabs" does what it always did.
+// Programme setup (Salesforce side): clicking Moonfill's 🚀 New Implementation button reads everything
+// the setup needs from the record, asks only whether to save each page, then shows a progress bar
+// (with a cancel ✕) while the background script fills the pages one by one (setup/background.js).
+// Moonfill's own code is unchanged: its button's click is caught first, in the capture phase.
+// "Just open the tabs" does what the button always did.
 (function () {
   const engine = globalThis.TCAEngine;
   const cfg = globalThis.TCA_CONFIG;
@@ -14,170 +14,188 @@
   const OFFERS = ['Access', 'Accelerate', 'Advanced'];
   const PAGES = ['Tracking settings', 'Invite user', 'Commission groups', 'Plugin store', 'Tracking tag settings',
     'Account details', 'Fee manager', 'Mobile tracking', 'Advertiser settings', 'Pre-join publishers'];
-  const ICON = { working: '…', saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠' };
+  const ICON = { working: '…', saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠', cancelled: '·' };
   const SHOPIFY_SHOP = /Shopify\.shop\s*=\s*["']([^"']+\.myshopify\.com)["']/i;
-  const SAVE_KEY = 'tcaSetupSave';
   const { all, visible } = engine.dom;
 
   // ---------- reading the record ----------
+  const field = label => ((engine.recordField(document, cfg, label).find(f => f.text) || {}).text || '').trim();
   function readMid() {
     const link = all(document, 'a[href*="ui.awin.com/dashboard/awin/advertiser/"]').find(visible);
     return link ? ((link.getAttribute('href').match(/advertiser\/(\d+)/) || [])[1] || '') : '';
   }
-  function readOffer() {
-    const text = (engine.recordField(document, cfg, cfg.platformOfferLabel).find(f => f.text) || {}).text || '';
-    return OFFERS.find(o => text.trim().toLowerCase().startsWith(o.toLowerCase())) || '';
+  const number = text => { const m = String(text).replace(',', '.').match(/-?\d+(\.\d+)?/); return m ? m[0] : ''; };
+
+  // Everything the setup needs, from the record: { values, blocked: [reasons] }.
+  function readRecord() {
+    const R = cfg.setupRecord;
+    const blocked = [];
+    const site = engine.landingPageUrl(document, cfg).url || '';
+    if (!site) blocked.push('The record has no Landing Page URL.');
+    const offerText = field(cfg.platformOfferLabel);
+    const platformOffer = OFFERS.find(o => offerText.toLowerCase().startsWith(o.toLowerCase())) || '';
+    if (!platformOffer) blocked.push(offerText ? `Platform Offer "${offerText}" isn't Access, Accelerate or Advanced.` : 'The record has no Platform Offer.');
+
+    // Commission group: only "Percentage" programmes are set up automatically (Sale + Percentage).
+    const type = field(R.commissionType);
+    const amount = number(field(R.commissionAmount));
+    const commission = /^percentage$/i.test(type)
+      ? (amount ? { transactionType: 'Sale', commissionType: 'Percentage', publisherCommission: amount }
+        : { commissionProblem: `"${R.commissionAmount}" is empty on the record, so the commission group wasn't set.` })
+      : { commissionSkip: type ? `Commission type is "${type}": set the commission group by hand` : `"${R.commissionType}" is empty on the record: set the commission group by hand` };
+
+    const values = {
+      websiteUrl: site, landingPage: site, platformOffer, ...commission,
+      approval: 'Manual Approval',
+      validationDays: (field(R.validationPeriod).match(/\d+/) || [''])[0],
+      assignedTc: engine.assignedTc(document, cfg)
+    };
+    return { values, blocked };
   }
+
   const ask = message => Promise.resolve().then(() => chrome.runtime.sendMessage(message)).then(a => a || { error: 'no answer' }, e => ({ error: e.message }));
 
   // The store's own myshopify address, if the site is a Shopify shop: { url } or { note }.
   async function shopifyAddress(site) {
     const page = await ask({ action: 'tcaReadSite', url: site, via: 'fetch' });
-    if (page.error === 'permission') return { note: 'To fill in a Shopify store\'s myshopify address automatically, turn on platform detection in Settings.' };
+    if (page.error === 'permission') return { note: 'Tip: allow platform detection in Settings so Shopify stores get their myshopify address.' };
     let shop = page.ok && (page.text.match(SHOPIFY_SHOP) || [])[1];
     const looksShopify = page.ok && T.detect(page.text, cfg).name === 'Shopify';
     if (!shop && (!page.ok || looksShopify)) {
       const tab = await ask({ action: 'tcaReadSite', url: site, via: 'tab' });
       shop = tab.ok && (tab.text.match(SHOPIFY_SHOP) || [])[1];
     }
-    if (shop) return { url: `https://${shop.toLowerCase()}`, note: 'Shopify store: Website URL set to its myshopify address.' };
-    return { note: looksShopify ? 'Looks like Shopify, but the myshopify address wasn\'t found: enter it by hand.' : '' };
+    if (shop) return { url: `https://${shop.toLowerCase()}`, note: 'Shopify store: its myshopify address is used as the Website URL.' };
+    return { note: looksShopify ? 'Looks like Shopify, but the myshopify address wasn\'t found: the Landing Page URL is used.' : '' };
   }
 
-  // ---------- the form ----------
+  // ---------- the dialog ----------
   const host = document.createElement('div');
   host.id = 'tca-setup-form';
   const shadow = host.attachShadow({ mode: 'open' });
-  const select = (name, label, options) => `<label>${label}<select name="${name}" required><option value="">Choose…</option>${options.map(o => `<option>${o}</option>`).join('')}</select></label>`;
   shadow.innerHTML = `
 <style>
   :host { all: initial; }
-  .backdrop { position: fixed; inset: 0; z-index: 2147483001; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; overflow: auto; padding: 40px 16px; }
-  .dialog { width: 520px; max-width: 100%; background: #fff; color: #181818; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.3); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  header { padding: 14px 18px 4px; font-size: 16px; font-weight: 600; }
-  .sub { padding: 0 18px; color: #5c5c5c; }
-  form { padding: 10px 18px 18px; display: grid; gap: 10px; }
-  fieldset { border: 1px solid #e5e5e5; border-radius: 6px; padding: 8px 12px 12px; display: grid; gap: 8px; margin: 0; }
-  legend { font-weight: 600; padding: 0 4px; }
-  label { display: grid; gap: 3px; font-weight: 600; }
-  input, select { font: inherit; font-weight: 400; padding: 5px 7px; border: 1px solid #c9c9c9; border-radius: 4px; }
-  label.tick { display: flex; gap: 8px; align-items: center; font-weight: 400; }
-  .note { color: #5c5c5c; font-size: 12px; font-weight: 400; }
-  .note:empty { display: none; }
-  .error { color: #ba0517; font-weight: 600; }
-  .error:empty { display: none; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .backdrop { position: fixed; inset: 0; z-index: 2147483001; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; overflow: auto; padding: 60px 16px; }
+  .dialog { width: 460px; max-width: 100%; background: #fff; color: #181818; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.3); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 16px 18px; display: grid; gap: 10px; }
+  header { font-size: 16px; font-weight: 600; }
+  .muted { color: #5c5c5c; }
+  .note { color: #5c5c5c; font-size: 12px; }
+  .note:empty, .error:empty { display: none; }
+  .error { color: #ba0517; font-weight: 600; white-space: pre-line; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
   button { font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 4px; border: 1px solid #0176d3; background: #fff; color: #0176d3; cursor: pointer; }
   button.primary { background: #0176d3; color: #fff; }
   button:disabled { opacity: .5; cursor: default; }
   button.link { border: 0; padding: 6px 4px; text-decoration: underline; margin-right: auto; }
-  ol { margin: 0; padding: 10px 18px 4px 40px; display: grid; gap: 4px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar { flex: 1; height: 10px; background: #e5e5e5; border-radius: 5px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: #0176d3; border-radius: 5px; transition: width .3s; }
+  .done .fill { background: #2e844a; }
+  .attention .fill { background: #dd7a01; }
+  .count { font-variant-numeric: tabular-nums; color: #5c5c5c; min-width: 40px; text-align: right; }
+  button.stop { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 0; background: #ba0517; color: #fff; font-size: 16px; line-height: 28px; }
+  .current { font-weight: 600; }
+  details summary { cursor: pointer; color: #5c5c5c; }
+  ol { margin: 6px 0 0; padding-left: 22px; display: grid; gap: 3px; }
   li .msg { color: #5c5c5c; font-size: 12px; }
   li[data-status="failed"], li[data-status="unconfirmed"] { color: #ba0517; }
   li[data-status="saved"] { color: #2e844a; }
-  .progress { padding-bottom: 14px; }
-  .progress .summary { padding: 6px 18px; font-weight: 600; }
-  .progress .row { padding: 0 18px; }
   [hidden] { display: none !important; }
 </style>
 <div class="backdrop" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="tca-setup-title">
     <header id="tca-setup-title">🚀 New Implementation setup</header>
-    <div class="sub mid"></div>
-    <form novalidate>
-      <fieldset><legend>From the record (check)</legend>
-        <label>Website URL<input name="websiteUrl" type="url" required></label>
-        <div class="note shopify"></div>
-        <label>Landing Page<input name="landingPage" type="url" required></label>
-        ${select('platformOffer', 'Platform Offer', OFFERS)}
-      </fieldset>
-      <fieldset><legend>Commission group</legend>
-        ${select('transactionType', 'Transaction Type', ['Sale', 'Lead'])}
-        ${select('commissionType', 'Commission Type', ['Fixed', 'Percentage'])}
-        <label>Publisher commission<input name="publisherCommission" type="text" required></label>
-      </fieldset>
-      <fieldset><legend>Advertiser settings</legend>
-        ${select('approval', 'Approval of Publishers Joining', ['Manual Approval', 'Auto Approval'])}
-        <label>Validation Period Days<input name="validationDays" type="number" min="1" step="1" required></label>
-      </fieldset>
-      <label class="tick"><input type="checkbox" name="save"> Save each page <span class="note">(off: pages are filled for you to check and save yourself)</span></label>
+    <div class="ask">
+      <div class="muted mid"></div>
+      <p>Everything is taken from the record. Save each page as it's filled?</p>
+      <div class="note shopify"></div>
       <div class="error" role="alert"></div>
       <div class="row">
         <button type="button" class="link tabs-only">Just open the tabs</button>
         <button type="button" class="cancel">Cancel</button>
-        <button type="submit" class="primary">Run setup</button>
+        <button type="button" class="fill-only">Fill only</button>
+        <button type="button" class="primary run">Run and save</button>
       </div>
-    </form>
+    </div>
     <div class="progress" hidden>
-      <ol>${PAGES.map((p, i) => `<li data-index="${i}"><span class="icon">·</span> ${p} <span class="msg"></span></li>`).join('')}</ol>
-      <div class="summary" role="status" aria-live="polite">Running… The pages open in a tab group and are done one at a time.</div>
-      <div class="row"><button type="button" class="copy">Copy results</button><button type="button" class="close">Close</button></div>
+      <div class="bar-row">
+        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div>
+        <span class="count">0 / 10</span>
+        <button type="button" class="stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
+      </div>
+      <div class="current" role="status" aria-live="polite">Starting…</div>
+      <details><summary>Details</summary>
+        <ol>${PAGES.map((p, i) => `<li data-index="${i}"><span class="icon">·</span> ${p} <span class="msg"></span></li>`).join('')}</ol>
+      </details>
+      <div class="row"><button type="button" class="copy">Copy results</button><button type="button" class="close">Hide</button></div>
     </div>
   </div>
 </div>`;
   const $ = sel => shadow.querySelector(sel);
-  const form = $('form');
-  const field = name => form.elements[name];
   let mid = '';
+  let record = { values: null, blocked: [] };
+  let shopping = null;   // the Shopify check, once started
+  let finished = 0;
   const notCreatedYet = m => /^0+$/.test(m);
 
   async function open() {
     mid = readMid();
-    form.reset();
-    $('.error').textContent = '';
-    $('.shopify').textContent = '';
-    $('form').hidden = false;
+    record = readRecord();
+    if (!mid) record.blocked.unshift('No MID found on this record.');
+    else if (notCreatedYet(mid)) record.blocked.unshift('This advertiser hasn\'t been created in Awin yet (the MID is 0). Create it first, then run the setup.');
+    $('.ask').hidden = false;
     $('.progress').hidden = true;
-    for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
-    $('.mid').textContent = mid ? `MID ${mid}` : 'No MID found on this record.';
-    // MID 0 means the advertiser hasn't been created in Awin yet: there's nothing to set up.
-    const notCreated = notCreatedYet(mid);
-    $('.error').textContent = notCreated ? 'This advertiser hasn\'t been created in Awin yet (the MID is 0). Create it first, then run the setup.' : '';
-    $('button[type="submit"]').disabled = notCreated;
-    $('.tabs-only').disabled = notCreated;
-    const site = engine.landingPageUrl(document, cfg).url || '';
-    field('websiteUrl').value = site;
-    field('landingPage').value = site;
-    field('platformOffer').value = readOffer();
-    // Saving is on unless the TC has turned it off before.
-    try { field('save').checked = (await chrome.storage.local.get(SAVE_KEY))[SAVE_KEY] !== false; } catch { field('save').checked = true; }
+    $('.mid').textContent = [mid ? `MID ${mid}` : '', record.values.platformOffer].filter(Boolean).join(' · ');
+    $('.error').textContent = record.blocked.join('\n');
+    $('.shopify').textContent = '';
+    const blocked = record.blocked.length > 0;
+    for (const b of ['.run', '.fill-only']) $(b).disabled = blocked;
+    $('.tabs-only').disabled = !mid || notCreatedYet(mid);
     $('.backdrop').hidden = false;
-    field('transactionType').focus();
-    if (site) {
+    $(blocked ? '.cancel' : '.run').focus();
+    shopping = null;
+    if (!blocked) {
+      const site = record.values.websiteUrl;
       $('.shopify').textContent = 'Checking whether the site is a Shopify store…';
-      const shop = await shopifyAddress(site);
-      if (shop.url && field('websiteUrl').value === site) field('websiteUrl').value = shop.url;
-      $('.shopify').textContent = shop.note || '';
+      shopping = shopifyAddress(site).then(shop => {
+        if (shop.url) record.values.websiteUrl = shop.url;
+        $('.shopify').textContent = shop.note || '';
+      });
     }
   }
 
-  function values() {
-    const v = Object.fromEntries(['websiteUrl', 'landingPage', 'platformOffer', 'transactionType', 'commissionType', 'publisherCommission', 'approval', 'validationDays']
-      .map(name => [name, String(field(name).value).trim()]));
-    const missing = Object.entries(v).filter(([, value]) => !value).map(([name]) => field(name).closest('label').firstChild.textContent.trim());
-    if (missing.length) throw new Error(`Please fill in: ${missing.join(', ')}.`);
-    for (const name of ['websiteUrl', 'landingPage']) if (!/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v[name])) throw new Error(`${name === 'websiteUrl' ? 'Website URL' : 'Landing Page'} must be a full web address starting with https://.`);
-    if (!/^\d+$/.test(v.validationDays) || +v.validationDays < 1) throw new Error('Validation Period Days must be a whole number of days.');
-    return { ...v, assignedTc: engine.assignedTc(document, cfg) };
+  async function start(save) {
+    if (record.blocked.length) return;
+    for (const b of ['.run', '.fill-only']) $(b).disabled = true;
+    if (shopping) await shopping;   // the Website URL may change for Shopify stores
+    const answer = await ask({ action: 'tcaSetupRun', mid, values: record.values, save });
+    if (!answer.ok) { $('.error').textContent = `The setup couldn't start: ${answer.error}`; for (const b of ['.run', '.fill-only']) $(b).disabled = false; return; }
+    finished = 0;
+    $('.ask').hidden = true;
+    $('.progress').hidden = false;
+    $('.progress').classList.remove('done', 'attention');
+    $('.stop').hidden = false;
+    $('.stop').disabled = false;
+    $('.close').textContent = 'Hide';
+    $('.current').textContent = 'Starting…';
+    for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
+    setBar(0);
   }
 
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-    if (notCreatedYet(mid)) return;   // the message is already showing
-    let v;
-    try { v = values(); } catch (error) { $('.error').textContent = error.message; return; }
-    if (!mid) { $('.error').textContent = 'No MID found on this record.'; return; }
-    const save = field('save').checked;
-    try { await chrome.storage.local.set({ [SAVE_KEY]: save }); } catch { /* not remembered */ }
-    const answer = await ask({ action: 'tcaSetupRun', mid, values: v, save });
-    if (!answer.ok) { $('.error').textContent = `The setup couldn't start: ${answer.error}`; return; }
-    $('form').hidden = true;
-    $('.progress').hidden = false;
-  });
+  function setBar(n) {
+    $('.fill').style.width = `${(n / PAGES.length) * 100}%`;
+    $('.bar').setAttribute('aria-valuenow', String(n));
+    $('.count').textContent = `${n} / ${PAGES.length}`;
+  }
 
   function progress(update) {
     if (update.done) {
-      $('.summary').textContent = update.error || `Finished: ${update.summary}.`;
+      $('.current').textContent = update.error || `${update.cancelled ? 'Cancelled' : 'Finished'}: ${update.summary}.`;
+      $('.stop').hidden = true;
+      $('.close').textContent = 'Close';
+      $('.progress').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
+      if (!update.cancelled) setBar(PAGES.length);
       return;
     }
     const li = shadow.querySelector(`li[data-index="${update.index}"]`);
@@ -186,18 +204,31 @@
     li.querySelector('.icon').textContent = ICON[update.status] || '·';
     const note = update.note || '';
     li.querySelector('.msg').textContent = update.status === 'working' ? `${update.message || 'working'}…` : update.status === 'saved' ? (note ? `— ${note}` : '') : `— ${update.message || ''}${update.diagnostics ? ` (${update.diagnostics})` : ''}`;
+    if (update.status === 'working') {
+      $('.current').textContent = `${PAGES[update.index]}${update.message ? `: ${update.message}` : ''}…`;
+    } else {
+      finished = Math.max(finished, update.index + 1);
+      setBar(finished);
+    }
   }
 
   // The results as text (page, status, message, structure report), to paste to whoever maintains it.
   $('.copy').addEventListener('click', async () => {
-    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.summary').textContent].join('\n');
+    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.current').textContent].join('\n');
     try { await navigator.clipboard.writeText(text); $('.copy').textContent = 'Copied'; } catch { $('.copy').textContent = 'Copy failed'; }
     setTimeout(() => { $('.copy').textContent = 'Copy results'; }, 2000);
   });
 
   const close = () => { $('.backdrop').hidden = true; };
+  $('.run').addEventListener('click', () => start(true));
+  $('.fill-only').addEventListener('click', () => start(false));
   $('.cancel').addEventListener('click', close);
-  $('.close').addEventListener('click', close);
+  $('.close').addEventListener('click', close);   // during a run: hides the dialog, the run carries on
+  $('.stop').addEventListener('click', () => {
+    $('.stop').disabled = true;
+    $('.current').textContent = 'Cancelling: the page being filled is finished first…';
+    ask({ action: 'tcaSetupCancel' });
+  });
   $('.backdrop').addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
   $('.tabs-only').addEventListener('click', () => { if (mid && !notCreatedYet(mid)) ask({ action: 'createNITabs', mid }); close(); });
 
@@ -218,5 +249,5 @@
   } catch { /* no extension messaging (tests) */ }
 
   (document.body || document.documentElement).appendChild(host);
-  globalThis.TCASetupForm = { open, values, progress };
+  globalThis.TCASetupForm = { open, start, progress, readRecord };
 })();

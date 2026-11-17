@@ -13,6 +13,9 @@
   const ALWAYS_SKIPPED = new Set([1, 6]);
   // The Plugin store page isn't needed for Access programmes: skipped without touching it.
   const PLUGIN_PAGE = 3;
+  // Commission groups is left for the TC when the record's commission isn't a percentage.
+  const COMMISSION_PAGE = 2;
+  let cancelRequested = false;
   const SYMBOL = { saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠' };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -107,6 +110,7 @@
 
   async function run({ mid, values, save }, recordTabId) {
     const progress = update => chrome.tabs.sendMessage(recordTabId, { action: 'tcaSetupProgress', ...update }).catch(() => {});
+    cancelRequested = false;
     const urls = typeof NI_URLS === 'function' ? NI_URLS(mid) : null;   // Moonfill's page list (background.js)
     if (!urls || urls.length !== PAGES.length) {
       progress({ done: true, error: 'Moonfill\'s list of New Implementation pages has changed, so the setup can\'t run. Use "Just open the tabs".' });
@@ -141,11 +145,18 @@
       progress({ index: i, name: PAGES[i], status: 'working' });
       await ensureOpen(i);
       let result;
-      const skip = ALWAYS_SKIPPED.has(i) ? 'comes pre-filled' : i === PLUGIN_PAGE && values.platformOffer === 'Access' ? 'not needed for Access' : null;
-      if (skip) {
-        result = { status: 'skipped', message: `Skipped: ${skip}.` };
+      if (cancelRequested) {
+        for (let j = i; j < urls.length; j++) progress({ index: j, name: PAGES[j], status: 'cancelled', message: 'not started (cancelled)' });
+        break;
+      }
+      const skip = ALWAYS_SKIPPED.has(i) ? 'comes pre-filled'
+        : i === PLUGIN_PAGE && values.platformOffer === 'Access' ? 'not needed for Access'
+          : i === COMMISSION_PAGE && values.commissionSkip ? values.commissionSkip : null;
+      const problem = i === COMMISSION_PAGE && values.commissionProblem;
+      if (skip || problem) {
+        result = problem ? { status: 'failed', message: problem } : { status: 'skipped', message: `Skipped: ${skip}.` };
         results.push({ name: PAGES[i], ...result });
-        chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL.skipped }).catch(() => {});
+        chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL[result.status] }).catch(() => {});
         progress({ index: i, name: PAGES[i], status: result.status, message: result.message });
         ensureOpen(i + 1);
         continue;
@@ -177,17 +188,21 @@
 
     const needsLook = results.filter(r => r.status === 'failed' || r.status === 'unconfirmed');
     const count = s => results.filter(r => r.status === s).length;
+    const cancelled = cancelRequested;
+    const notStarted = urls.length - results.length;
     const summary = [count('saved') && `${count('saved')} saved`, count('filled') && `${count('filled')} filled (not saved)`,
-      count('skipped') && `${count('skipped')} skipped`, needsLook.length && `${needsLook.length} need a look`].filter(Boolean).join(', ');
-    progress({ done: true, summary });
+      count('skipped') && `${count('skipped')} skipped`, needsLook.length && `${needsLook.length} need a look`,
+      cancelled && notStarted && `${notStarted} not started`].filter(Boolean).join(', ') || 'nothing done';
+    cancelRequested = false;
+    progress({ done: true, summary, cancelled, needsLook: needsLook.length });
     try {
       chrome.notifications.create(`tcaSetup-${mid}-${Date.now()}`, {
-        type: 'basic', iconUrl: 'assets/icon128.png', title: `Setup for MID ${mid}: ${needsLook.length ? 'needs a look' : 'done'}`,
+        type: 'basic', iconUrl: 'assets/icon128.png', title: `Setup for MID ${mid}: ${cancelled ? 'cancelled' : needsLook.length ? 'needs a look' : 'done'}`,
         message: `${summary}.${needsLook.length ? ' ' + needsLook.map(r => `${r.name}: ${r.message}`).join(' ') : ''}`.slice(0, 400)
       });
     } catch { /* notifications are a nicety */ }
     if (globalThis.TCAUsageWorker) {
-      globalThis.TCAUsageWorker.add({ tool: 'New Implementation', action: 'setup', outcome: needsLook.length ? 'failed' : 'success', reason: 'setup-page-failed', tc: values.assignedTc });
+      globalThis.TCAUsageWorker.add({ tool: 'New Implementation', action: 'setup', outcome: needsLook.length || cancelled ? 'failed' : 'success', reason: cancelled ? 'setup-cancelled' : 'setup-page-failed', tc: values.assignedTc });
     }
     return results;
   }
@@ -220,6 +235,14 @@
     chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [sender.frameId || 0] }, world: 'MAIN', func: setEditorInPage, args: [String(message.code)] })
       .then(([frame]) => sendResponse((frame && frame.result) || { error: 'no result' }), error => sendResponse({ error: error.message }));
     return true;
+  });
+
+  // The ✕ on the progress bar: the page being filled is finished, then the run stops.
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'tcaSetupCancel') return undefined;
+    cancelRequested = true;
+    sendResponse({ ok: true });
+    return undefined;
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

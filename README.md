@@ -74,6 +74,8 @@ The other 15 fields, such as Tech notes, are left untouched. If the Implementati
 
 Template values only fill **empty** fields, so an answer that's already there is kept. If there's no Landing Page URL, no platform is recognised, or the signs point to two platforms, the default fill is used and the panel says why. Detection needs permission to read websites, which you grant once in Settings (**Allow platform detection**). Until then, the default fill is used.
 
+**SingleView Setup.** For **Accelerate** and **Advanced** programmes (the record's Platform Offer), Fill also sets the **SingleView Setup** checklist below the Technical Checklist: SingleView Setup Type → **MasterTag Enabled**, SingleView Integration Status → **New**. For Access, it's left alone.
+
 **Settings.** For every checklist field you can choose:
 - **Team default** (the agreed answer)
 - **Leave untouched**
@@ -84,35 +86,32 @@ You can also allow or turn off platform detection, choose the date format (DD/MM
 
 ### New Implementation setup
 
-Clicking **🚀 New Implementation** on a record opens a short setup form instead of just the tabs.
+Clicking **🚀 New Implementation** on a record sets up the programme in Awin. Everything comes from the record:
 
-**Filled in from the record, for you to check:**
-- **Website URL** and **Landing Page:** from the Landing Page URL. For Shopify stores, the Website URL is the store's `https://…myshopify.com` address; this needs platform detection allowed in Settings.
-- **Platform Offer:** Access, Accelerate or Advanced.
+| Setup value | Taken from |
+|---|---|
+| Website URL, Landing Page | **Landing Page URL** (Shopify stores: their `https://…myshopify.com` address, with platform detection allowed) |
+| Platform Offer | **Platform Offer** (Access, Accelerate or Advanced) |
+| Transaction Type, Commission Type | **Commission type** = Percentage → Sale + Percentage. Anything else: the commission group is left for you |
+| Publisher Commission | **Commission Amount** |
+| Approval of Publishers Joining | always **Manual Approval** |
+| Validation Period Days | **Auto validation period**. For Access, a value already on the page is kept; if it's empty or -1, it becomes the period + 7 |
 
-**Your answers:**
-- Transaction Type, Commission Type and Publisher commission
-- Approval of Publishers Joining and Validation Period Days
-
-Press **Run setup**. The 10 pages open in a tab group and are done one at a time:
+You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**. A progress bar then shows the pages being done one at a time. The red **✕** cancels: the page being filled is finished, and the rest aren't started.
 
 | Page | What the setup does |
 |---|---|
-| Tracking settings | Website URL, Landing Page, query string append (by Platform Offer), Link Builder and relative URLs ticked |
+| Tracking settings | Website URL, Landing Page, query string append (by Platform Offer), Link Builder and relative URLs ticked, Add to Accepted Domains |
 | Invite user, Fee manager | skipped (they come pre-filled) |
-| Commission groups | Transaction Type, Commission Type, Publisher commission |
+| Commission groups | Add Default Commission Group, then Transaction Type, Commission Type, Publisher Commission |
 | Plugin store | Not for Access. Otherwise adds **R.O.EYE - Consent - SingleView** with its code line |
-| Tracking tag settings | **Conversion Tag and Image Pixel integrated** |
+| Tracking tag settings | **Conversion Tag and Image Pixel integrated** (the page is reloaded first) |
 | Account details | IP tracking, and stripping the referrer path when it has no valid domain |
 | Mobile tracking | **Tracking is implemented on mobile site** |
-| Advertiser settings | Approval of Publishers Joining, Validation Period Days |
+| Advertiser settings | Manual Approval, Validation Period Days |
 | Pre-join publishers | Publishers 45628 and 111, retried up to 5 times if the page shows an error |
 
-**How each page ends up:**
-- Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. The form lists each page's result, and a notification sums it up.
-- A page that fails is left open and unsaved, and the setup carries on with the next one.
-- **Save each page** is on by default. Turn it off to have the pages filled but not saved, so you can check them first. The choice is remembered.
-- **Just open the tabs** opens the pages without filling anything, as before.
+Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. **Details** under the progress bar lists each page's result, and **Copy results** copies it. A MID of 0 (advertiser not created in Awin yet) can't be run. **Just open the tabs** opens the pages without filling anything, as before.
 
 ### Fields filled by both
 

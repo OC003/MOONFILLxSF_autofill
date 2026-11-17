@@ -36,6 +36,9 @@
       <option value="dates-filled">Date fields already filled</option>
       <option value="no-landing">No Landing Page URL</option>
       <option value="no-tc">Assigned TC empty</option>
+      <option value="advanced">Platform Offer: Advanced</option>
+      <option value="fixed">Commission type: Fixed</option>
+      <option value="no-amount">Commission Amount empty</option>
     </select>
   </label>
 </div>
@@ -64,7 +67,11 @@
   const technical = globalThis.TCA_FIELDS.map(field);
   if (scenario === 'missing-option') technical.find(f => f.label === 'Server to server').options = ['--None--', 'No', 'Exempt'];
   const commercial = [field({ label: 'Img tag implemented' }), field({ label: 'Tech notes' })];
-  const sections = [{ key: 'TC', title: 'Technical Checklist', fields: technical }, { key: 'CC', title: 'Commercial Checklist', fields: commercial }];
+  const singleView = [
+    { label: 'SingleView Setup Type', kind: 'picklist', options: ['--None--', 'MasterTag Enabled', 'Manual'] },
+    { label: 'SingleView Integration Status', kind: 'picklist', options: ['--None--', 'New', 'Live'] }
+  ];
+  const sections = [{ key: 'TC', title: 'Technical Checklist', fields: technical }, { key: 'SV', title: 'SingleView Setup', fields: singleView }, { key: 'CC', title: 'Commercial Checklist', fields: commercial }];
 
   let record = {
     'TC::Server to server': 'No',
@@ -189,10 +196,15 @@
       h('div', { id: 'moonfillSalesforceSection' },
         h('a', { href: 'https://ui.awin.com/dashboard/awin/advertiser/123456', text: 'MID link (mock)' }),
         h('button', { type: 'button', class: 'mf-btn mf-impl', text: '🚀 New Implementation', onclick: () => { window.moonfillNIClicks = (window.moonfillNIClicks || 0) + 1; } })),
+      ...[['Commission type', scenario === 'fixed' ? 'Fixed' : 'Percentage'], ['Commission Amount', scenario === 'no-amount' ? '' : '5%'], ['Auto validation period', '30 days']].map(([label, text]) =>
+        h('records-record-layout-item', { 'field-label': label },
+          h('div', { class: 'slds-form-element slds-form-element_readonly' },
+            h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: label })),
+            h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value', text }))))),
       h('records-record-layout-item', { 'field-label': 'Platform Offer' },
         h('div', { class: 'slds-form-element slds-form-element_readonly' },
           h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Platform Offer' })),
-          h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value', text: scenario === 'no-landing' ? '' : 'Advanced' })))),
+          h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value', text: scenario === 'no-landing' ? '' : scenario === 'advanced' ? 'Advanced' : 'Access' })))),
       h('records-record-layout-item', { 'field-label': 'Assigned TC' },
         h('div', { class: 'slds-form-element slds-form-element_readonly' },
           h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Assigned TC' })),

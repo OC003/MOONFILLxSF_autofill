@@ -573,9 +573,9 @@ test('runner: gives up on pre-join after 5 attempts and says so', async () => {
 
 // ---------- The form on the Salesforce record ----------
 
-async function record(chrome) {
+async function record(chrome, scenario = 'success') {
   const path = 'dev/mock/lightning-record.html';
-  const dom = await JSDOM.fromFile(fileURLToPath(new URL(path, root)), {url: new URL(`${path}?scenario=success`, root).href, runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true});
+  const dom = await JSDOM.fromFile(fileURLToPath(new URL(path, root)), {url: new URL(`${path}?scenario=${scenario}`, root).href, runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true});
   await new Promise(resolve => dom.window.addEventListener('load', resolve));
   const {window} = dom;
   window.chrome = chrome;
@@ -592,7 +592,7 @@ function fakeChrome(site = () => ({error: 'permission'})) {
 }
 const formRoot = window => window.document.getElementById('tca-setup-form').shadowRoot;
 
-test('form: the 🚀 click opens the setup form instead of Moonfill\'s tabs, filled in from the record', async () => {
+test('form: 🚀 reads everything from the record and only asks about saving (Moonfill\'s own click doesn\'t run)', async () => {
   const chrome = fakeChrome();
   const window = await record(chrome);
   window.document.querySelector('button.mf-impl').click();
@@ -600,27 +600,87 @@ test('form: the 🚀 click opens the setup form instead of Moonfill\'s tabs, fil
   assert.equal(window.moonfillNIClicks, undefined, "Moonfill's own click handler didn't run");
   const ui = formRoot(window);
   assert.equal(ui.querySelector('.backdrop').hidden, false);
-  const f = ui.querySelector('form').elements;
-  assert.deepEqual([f.websiteUrl.value, f.landingPage.value, f.platformOffer.value], ['https://shop.example.com/', 'https://shop.example.com/', 'Advanced']);
-  assert.equal(ui.querySelector('.mid').textContent, 'MID 123456');
-  assert.match(ui.querySelector('.shopify').textContent, /turn on platform detection in Settings/);
-  assert.equal(f.save.checked, true, 'saving is on by default');
+  assert.equal(ui.querySelector('form'), null, 'no form to fill in');
+  assert.equal(ui.querySelector('.mid').textContent, 'MID 123456 · Access');
+  assert.deepEqual([...ui.querySelectorAll('.ask button')].map(b => b.textContent), ['Just open the tabs', 'Cancel', 'Fill only', 'Run and save']);
+  assert.equal(ui.querySelector('.run').disabled, false);
+  assert.deepEqual(plain(window.TCASetupForm.readRecord()), {blocked: [], values: {
+    websiteUrl: 'https://shop.example.com/', landingPage: 'https://shop.example.com/', platformOffer: 'Access',
+    transactionType: 'Sale', commissionType: 'Percentage', publisherCommission: '5',
+    approval: 'Manual Approval', validationDays: '30', assignedTc: 'Alex Mock-Person'}});
 });
 
-test('form: a MID of 0 means the advertiser isn\'t created in Awin yet, so nothing can be run', async () => {
+test('form: Run and save starts the run with the record\'s values; Fill only starts it without saving', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome, 'advanced');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  const run = chrome.messages.find(m => m.action === 'tcaSetupRun');
+  assert.equal(run.save, true);
+  assert.equal(run.mid, '123456');
+  assert.equal(run.values.platformOffer, 'Advanced');
+  assert.equal(ui.querySelector('.progress').hidden, false);
+  assert.equal(ui.querySelector('.ask').hidden, true);
+
+  await window.TCASetupForm.open();
+  ui.querySelector('.fill-only').click();
+  await tick(30);
+  assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupRun').at(-1).save, false);
+});
+
+test('form: a non-Percentage commission is left for the TC; a missing amount is flagged', async () => {
+  const fixed = await record(fakeChrome(), 'fixed');
+  const v = fixed.TCASetupForm.readRecord().values;
+  assert.equal(v.commissionSkip, 'Commission type is "Fixed": set the commission group by hand');
+  assert.equal(v.transactionType, undefined);
+  const empty = await record(fakeChrome(), 'no-amount');
+  assert.match(empty.TCASetupForm.readRecord().values.commissionProblem, /"Commission Amount" is empty on the record/);
+});
+
+test('form: the progress bar fills as pages finish; the red ✕ cancels; the end shows the summary', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  chrome.listener({action: 'tcaSetupProgress', index: 0, status: 'working'});
+  assert.match(ui.querySelector('.current').textContent, /^Tracking settings…/);
+  chrome.listener({action: 'tcaSetupProgress', index: 0, status: 'saved'});
+  chrome.listener({action: 'tcaSetupProgress', index: 1, status: 'skipped', message: 'Skipped: comes pre-filled.'});
+  assert.equal(ui.querySelector('.count').textContent, '2 / 10');
+  assert.equal(ui.querySelector('.fill').style.width, '20%');
+  const stop = ui.querySelector('.stop');
+  assert.equal(stop.textContent, '✕');
+  stop.click();
+  await tick();
+  assert.equal(chrome.messages.at(-1).action, 'tcaSetupCancel');
+  assert.match(ui.querySelector('.current').textContent, /Cancelling/);
+  chrome.listener({action: 'tcaSetupProgress', done: true, cancelled: true, summary: '1 saved, 1 skipped, 8 not started'});
+  assert.equal(ui.querySelector('.current').textContent, 'Cancelled: 1 saved, 1 skipped, 8 not started.');
+  assert.equal(ui.querySelector('.stop').hidden, true);
+  assert.equal(ui.querySelector('.close').textContent, 'Close');
+});
+
+test('form: a MID of 0, or a record without a Landing Page URL, can\'t be run', async () => {
   const chrome = fakeChrome();
   const window = await record(chrome);
   window.document.querySelector('a[href*="ui.awin.com/dashboard/awin/advertiser/"]').setAttribute('href', 'https://ui.awin.com/dashboard/awin/advertiser/0');
   await window.TCASetupForm.open();
   const ui = formRoot(window);
-  assert.equal(ui.querySelector('.mid').textContent, 'MID 0');
   assert.match(ui.querySelector('.error').textContent, /hasn't been created in Awin yet \(the MID is 0\)/);
-  assert.equal(ui.querySelector('button[type="submit"]').disabled, true);
+  assert.equal(ui.querySelector('.run').disabled, true);
+  assert.equal(ui.querySelector('.fill-only').disabled, true);
   assert.equal(ui.querySelector('.tabs-only').disabled, true);
-  ui.querySelector('form').dispatchEvent(new window.Event('submit', {cancelable: true}));
+  ui.querySelector('.run').click();
   await tick();
   assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupRun').length, 0);
-  assert.match(ui.querySelector('.error').textContent, /hasn't been created in Awin yet/, 'the message stays');
+
+  const noLanding = await record(fakeChrome(), 'no-landing');
+  await noLanding.TCASetupForm.open();
+  assert.match(formRoot(noLanding).querySelector('.error').textContent, /no Landing Page URL[\s\S]*no Platform Offer/);
 
   const {start, created} = runner(() => ({ok: true}));
   assert.deepEqual(plain(await start({action: 'tcaSetupRun', mid: '0', values: VALUES})), {ok: false, error: "the MID is 0: the advertiser hasn't been created in Awin yet."});
@@ -631,42 +691,79 @@ test('form: Shopify stores get their myshopify address as the Website URL', asyn
   const chrome = fakeChrome(() => ({ok: true, status: 200, text: '<script>Shopify.shop = "fictional-shop.myshopify.com";</script> cdn.shopify.com'}));
   const window = await record(chrome);
   await window.TCASetupForm.open();
-  const f = formRoot(window).querySelector('form').elements;
-  assert.equal(f.websiteUrl.value, 'https://fictional-shop.myshopify.com');
-  assert.equal(f.landingPage.value, 'https://shop.example.com/');
+  formRoot(window).querySelector('.run').click();
+  await tick(50);
+  const run = chrome.messages.find(m => m.action === 'tcaSetupRun');
+  assert.equal(run.values.websiteUrl, 'https://fictional-shop.myshopify.com');
+  assert.equal(run.values.landingPage, 'https://shop.example.com/');
 });
 
-test('form: Run setup checks the answers, then starts the run with them; Just open the tabs is Moonfill\'s old behaviour', async () => {
+test('form: Just open the tabs is Moonfill\'s old behaviour', async () => {
   const chrome = fakeChrome();
   const window = await record(chrome);
   await window.TCASetupForm.open();
-  const ui = formRoot(window);
-  const f = ui.querySelector('form').elements;
-  ui.querySelector('button[type="submit"]').click();
-  await tick();
-  assert.match(ui.querySelector('.error').textContent, /Please fill in: Transaction Type, Commission Type, Publisher commission, Approval of Publishers Joining, Validation Period Days/);
-  Object.assign(f.transactionType, {value: 'Lead'}); f.commissionType.value = 'Fixed'; f.publisherCommission.value = '5'; f.approval.value = 'Manual Approval'; f.validationDays.value = '3.5';
-  ui.querySelector('button[type="submit"]').click();
-  await tick();
-  assert.match(ui.querySelector('.error').textContent, /whole number of days/);
-  f.validationDays.value = '30';
-  ui.querySelector('button[type="submit"]').click();
-  await tick();
-  const run = chrome.messages.find(m => m.action === 'tcaSetupRun');
-  assert.deepEqual(plain(run), {action: 'tcaSetupRun', mid: '123456', save: true, values: {
-    websiteUrl: 'https://shop.example.com/', landingPage: 'https://shop.example.com/', platformOffer: 'Advanced', transactionType: 'Lead', commissionType: 'Fixed',
-    publisherCommission: '5', approval: 'Manual Approval', validationDays: '30', assignedTc: 'Alex Mock-Person'}});
-  assert.equal(chrome.local.tcaSetupSave, true, 'the save choice is remembered');
-  assert.equal(ui.querySelector('.progress').hidden, false);
-  chrome.listener({action: 'tcaSetupProgress', index: 2, status: 'failed', message: 'Not found.'});
-  chrome.listener({action: 'tcaSetupProgress', done: true, summary: '8 saved, 1 need a look'});
-  assert.match(ui.querySelector('li[data-index="2"]').textContent, /⚠ Commission groups — Not found\./);
-  assert.equal(ui.querySelector('.summary').textContent, 'Finished: 8 saved, 1 need a look.');
-
-  await window.TCASetupForm.open();
-  ui.querySelector('.tabs-only').click();
+  formRoot(window).querySelector('.tabs-only').click();
   await tick();
   assert.deepEqual(plain(chrome.messages.at(-1)), {action: 'createNITabs', mid: '123456'});
+});
+
+// ---------- Advertiser settings (page 9) and commission rules ----------
+
+const advertiserPage = days => awin('/provider/migrated-advertiser-settings/123456', `
+  <label for="a1">Approval of Publishers Joining</label><select id="a1"><option value="0">Manual Approval</option><option value="1" selected>Auto Approval</option></select>
+  <label for="d1">Validation Period Days</label><input type="number" id="d1" value="${days}"><button id="migrated_advertiser_settings_save">Save</button>`);
+
+test('advertiser settings: Manual Approval always; Validation Period Days from the record\'s Auto validation period', async () => {
+  const w = advertiserPage('45');
+  const result = await fill(w, {...VALUES, platformOffer: 'Advanced', approval: 'Manual Approval', validationDays: '30'});
+  assert.equal(result.status, 'filled', result.message);
+  assert.deepEqual([w.document.getElementById('a1').value, w.document.getElementById('d1').value], ['0', '30']);
+});
+
+test('advertiser settings, Access: a set Validation Period Days is left; empty or -1 becomes the period + 7', async () => {
+  const access = {...VALUES, platformOffer: 'Access', approval: 'Manual Approval', validationDays: '30'};
+  let w = advertiserPage('60');
+  let result = await fill(w, access);
+  assert.equal(w.document.getElementById('d1').value, '60');
+  assert.match(result.message, /already set \(60\): left as it is/);
+  assert.equal(w.document.getElementById('a1').value, '0', 'approval still set to Manual');
+  for (const unset of ['', '-1']) {
+    w = advertiserPage(unset);
+    result = await fill(w, access);
+    assert.equal(w.document.getElementById('d1').value, '37', `"${unset}" → 30 + 7`);
+    assert.match(result.message, /was empty: set to 30 \+ 7 = 37/);
+    assert.equal((await w.TCASetupFill.verifyPage(access)).status, 'saved');
+  }
+});
+
+test('runner: a non-Percentage commission skips page 3 without touching it; a missing amount flags it', async () => {
+  const asked = [];
+  const r = runner((index, m) => { if (m.action === 'tcaSetupFill') { asked.push(index); return {status: 'filled', message: 'Filled.'}; } return {ok: true}; });
+  const values = {...VALUES, platformOffer: 'Advanced', transactionType: undefined, commissionSkip: 'Commission type is "Fixed": set the commission group by hand'};
+  await r.start({action: 'tcaSetupRun', mid: '1', values, save: false});
+  for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
+  assert.ok(!asked.includes(2));
+  assert.match(r.context.notified.message, /3 skipped/);
+
+  const r2 = runner((index, m) => (m.action === 'tcaSetupFill' ? {status: 'filled', message: 'Filled.'} : {ok: true}));
+  await r2.start({action: 'tcaSetupRun', mid: '1', values: {...VALUES, commissionProblem: '"Commission Amount" is empty on the record, so the commission group wasn\'t set.'}, save: false});
+  for (let i = 0; i < 300 && !r2.context.notified; i++) await tick(10);
+  assert.match(r2.context.notified.message, /Commission groups: "Commission Amount" is empty on the record/);
+});
+
+test('runner: cancelling finishes the page being filled, then stops; the rest aren\'t started', async () => {
+  let listenersRef;
+  const r = runner((index, m) => {
+    if (m.action === 'tcaSetupFill' && index === 2) { listenersRef(); return new Promise(res => setTimeout(() => res({status: 'filled', message: 'Filled.'}), 30)); }
+    return m.action === 'tcaSetupFill' ? {status: 'filled', message: 'Filled.'} : {ok: true};
+  });
+  listenersRef = () => r.start({action: 'tcaSetupCancel'});
+  await r.start({action: 'tcaSetupRun', mid: '1', values: {...VALUES, platformOffer: 'Advanced'}, save: false});
+  for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
+  assert.equal(r.created.length, 4, 'page 3 finished; only the next page had been opened ahead');
+  assert.match(r.context.notified.title, /cancelled/);
+  assert.match(r.context.notified.message, /2 filled \(not saved\), 1 skipped, 7 not started/);
+  assert.equal(r.context.usage.at(-1).reason, 'setup-cancelled');
 });
 
 test('manifest: the setup filler runs on ui.awin.com only, top frame, with no panel of its own', async () => {
@@ -677,13 +774,5 @@ test('manifest: the setup filler runs on ui.awin.com only, top frame, with no pa
   assert.equal(entry.all_frames, undefined);
   const w = awin('/tracking-settings/us/awin/advertiser/1/main-settings', '');
   assert.equal(w.document.querySelector('[id^="tca-"]'), null, 'nothing is added to Awin pages');
-});
-
-test('form: turning Save each page off is remembered for the next run', async () => {
-  const chrome = fakeChrome();
-  chrome.local.tcaSetupSave = false;
-  const window = await record(chrome);
-  await window.TCASetupForm.open();
-  assert.equal(formRoot(window).querySelector('form').elements.save.checked, false);
 });
 

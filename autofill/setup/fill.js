@@ -490,6 +490,9 @@
 
   let pluginScope = null;   // the plugin menu, once open
 
+  // Page 9's Validation Period Days: the record's period, plus 7 for Access (where it was empty).
+  const advertiserDays = v => String(v.platformOffer === 'Access' ? +v.validationDays + 7 : +v.validationDays);
+
   // Page 1's fields: by id (from the page check), or by label if the id differs.
   const TRACKING = [
     ['MainWebsiteURL', 'Website URL', 'text'],
@@ -545,10 +548,12 @@
     { key: 'invite', name: 'Invite user', match: /\/settings\/invite-user/, skip: () => 'comes pre-filled' },
     {
       key: 'commission', name: 'Commission groups', match: /\/commission-manager\/.*\/commission-groups/,
+      skip: v => v.commissionSkip || null,
       // A table: column headings on top, a row of boxes underneath. In that row, boxes 1–3 are left
       // alone and boxes 4, 5, 6 are Transaction Type, Commission Type and Publisher Commission.
       // The row appears after clicking "Add Default Commission Group".
       async fill(v) {
+        if (v.commissionProblem) fail(v.commissionProblem);
         await waitFor(() => isAgGrid() || commissionRow() || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
         commissionLog = [];
         if (isAgGrid()) return agCommission(v);
@@ -640,13 +645,26 @@
         const days = fieldByLabel('Validation Period Days', 'input');
         if (!approval) fail('"Approval of Publishers Joining" not found on the page.');
         if (!days) fail('"Validation Period Days" not found on the page.');
+        // Validation Period Days: the record's "Auto validation period". For Access it's usually set
+        // already: left alone unless it's empty or -1, when it becomes the record's period + 7.
+        const now = String(days.value).trim();
+        const unset = now === '' || now === '-1';
+        if (v.platformOffer === 'Access' && !unset) {
+          chooseNative(approval, v.approval, 'Approval of Publishers Joining');
+          return { note: `Validation Period Days already set (${now}): left as it is.` };
+        }
+        if (!/^\d+$/.test(String(v.validationDays))) fail('"Auto validation period" is empty on the record, so Validation Period Days couldn\'t be set.');
+        const target = advertiserDays(v);
         chooseNative(approval, v.approval, 'Approval of Publishers Joining');
-        await setText(days, v.validationDays, 'Validation Period Days');
+        await setText(days, target, 'Validation Period Days');
+        return v.platformOffer === 'Access' ? { note: `Validation Period Days was empty: set to ${v.validationDays} + 7 = ${target}.` } : null;
       },
       save: () => byId('migrated_advertiser_settings_save') || button('Save'),
       verify: v => {
         const approval = fieldByLabel('Approval of Publishers Joining', 'select');
-        return [approval && same(approval.selectedOptions[0]?.text, v.approval), fieldByLabel('Validation Period Days', 'input')?.value === String(v.validationDays)];
+        const days = String(fieldByLabel('Validation Period Days', 'input')?.value ?? '').trim();
+        const daysOk = v.platformOffer === 'Access' ? days !== '' && days !== '-1' : days === advertiserDays(v);
+        return [approval && same(approval.selectedOptions[0]?.text, v.approval), daysOk];
       }
     },
     {

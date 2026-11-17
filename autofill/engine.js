@@ -303,7 +303,8 @@
   }
 
   // Every editable control on the page, keyed by field label and whether it's inside the checklist.
-  function snapshot(doc, cfg, section, targetLabels) {
+  // targets: [[section element, title, Set of target labels]] for each section being filled.
+  function snapshot(doc, cfg, targets) {
     const S = cfg.selectors;
     const counts = {};
     const out = {};
@@ -313,9 +314,9 @@
       for (const sel of S.item) { item = closest(el, sel); if (item) break; }
       const labelEl = item && all(item, S.label)[0];
       const label = labelEl ? cleanText(labelEl, S.labelNoise) : '(unlabelled)';
-      const inChecklist = within(section, el);
-      if (inChecklist && targetLabels.has(norm(label))) continue;
-      const where = inChecklist ? cfg.checklistTitle : 'elsewhere on the page';
+      const home = targets.find(([section]) => within(section, el));
+      if (home && home[2].has(norm(label))) continue;
+      const where = home ? home[1] : 'elsewhere on the page';
       const key = `${where} › ${label}`;
       counts[key] = (counts[key] || 0) + 1;
       out[`${key}#${counts[key]}`] = readAny(el, cfg);
@@ -396,14 +397,29 @@
     });
 
     try {
-      const targets = resolveTargets(doc, cfg, fields, notes);
-      let section = await expandChecklist(doc, cfg);
-      const current = () => (section.isConnected && visible(section) ? section : (section = findChecklist(doc, cfg).section));
-      const control = field => { const item = rowFor(current(), cfg, field.label); return { item, ...controlFor(item, cfg, field.label) }; };
+      let targets = resolveTargets(doc, cfg, fields, notes);
+      // A field may belong to another section of the record (field.section, e.g. "SingleView Setup");
+      // the rest are in the Technical Checklist. A missing optional section is skipped with a note.
+      const titleOf = f => f.section || cfg.checklistTitle;
+      const cfgFor = title => (title === cfg.checklistTitle ? cfg : { ...cfg, checklistTitle: title });
+      const sections = {};
+      for (const title of [cfg.checklistTitle, ...new Set(targets.map(titleOf).filter(t => t !== cfg.checklistTitle))]) {
+        try { sections[title] = await expandChecklist(doc, cfgFor(title)); } catch (error) {
+          if (title === cfg.checklistTitle || !targets.filter(f => titleOf(f) === title).every(f => f.optional)) throw error;
+          notes.push(`No "${title}" section found, so its fields were left as they are.`);
+        }
+      }
+      targets = targets.filter(f => sections[titleOf(f)]);
+      const current = (title = cfg.checklistTitle) => {
+        const s = sections[title];
+        return s.isConnected && visible(s) ? s : (sections[title] = findChecklist(doc, cfgFor(title)).section);
+      };
+      const control = field => { const item = rowFor(current(titleOf(field)), cfg, field.label); return { item, ...controlFor(item, cfg, field.label) }; };
 
       // Clean baseline: Save commits the whole page, so unrelated unsaved edits would be saved with ours.
       if (isEditing(doc, cfg)) throw new StopError('The record is already in edit mode. Save or cancel your own edits first.');
-      const items = targets.map(f => rowFor(section, cfg, f.label));
+      const items = targets.filter(f => titleOf(f) === cfg.checklistTitle).map(f => rowFor(current(), cfg, f.label));
+      for (const f of targets) rowFor(current(titleOf(f)), cfg, f.label);   // every field is there before anything starts
 
       // Enter edit mode through a pencil inside the Technical Checklist only.
       const pencil = items.map(i => all(i, S.editButton).filter(visible)).find(p => p.length === 1);
@@ -428,8 +444,8 @@
         if (field.onlyIfEmpty && !isBlank(readAny(c.el, cfg))) { notes.push(`${field.label} already had a value, so it was kept.`); continue; }
         writes.push(field);
       }
-      const targetLabels = new Set(writes.map(t => norm(t.label)));
-      const before = snapshot(doc, cfg, current(), targetLabels);
+      const targetMap = () => Object.keys(sections).map(title => [current(title), title, new Set(writes.filter(f => titleOf(f) === title).map(f => norm(f.label)))]);
+      const before = snapshot(doc, cfg, targetMap());
 
       for (const field of writes) {
         const c = control(field);
@@ -443,7 +459,7 @@
       }
 
       await sleep(300);
-      const moved = firstDifference(before, snapshot(doc, cfg, current(), targetLabels));
+      const moved = firstDifference(before, snapshot(doc, cfg, targetMap()));
       if (moved) throw new StopError(`"${moved}" changed unexpectedly, so nothing was saved.`);
 
       if (mode === 'fill') {
@@ -464,7 +480,7 @@
       if (outcome.error) return { status: 'failed', message: `Salesforce did not save: ${outcome.error} Your ${changed} change(s) are still unsaved on the page.`, changed };
 
       // Read the saved values back from the record.
-      const wrongNow = () => { try { const s = findChecklist(doc, cfg).section; return writes.filter(f => !shows(f, viewValue(rowFor(s, cfg, f.label), cfg), cfg)); } catch { return writes; } };
+      const wrongNow = () => { try { return writes.filter(f => !shows(f, viewValue(rowFor(findChecklist(doc, cfgFor(titleOf(f))).section, cfg, f.label), cfg), cfg)); } catch { return writes; } };
       const settled = await waitFor(() => (wrongNow().length ? null : true), cfg.timeouts.readBack, cfg.pollMs);
       if (!settled) {
         const wrong = wrongNow();

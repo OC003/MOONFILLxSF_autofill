@@ -48,6 +48,21 @@ globalThis.TCA_CONFIG = {
   // Programme setup: the record field that decides the query string append and the plugin.
   platformOfferLabel: 'Platform Offer',
 
+  // Programme setup: the record fields (marketing checklist) the setup reads instead of asking.
+  setupRecord: {
+    commissionType: 'Commission type',       // "Percentage" → Sale + Percentage; anything else: by hand
+    commissionAmount: 'Commission Amount',   // the publisher commission
+    validationPeriod: 'Auto validation period'
+  },
+
+  // For these Platform Offers, Fill also sets the "SingleView Setup" checklist (below the Technical
+  // Checklist). Left alone for any other offer, or if the record has no such section.
+  singleView: {
+    offers: ['Accelerate', 'Advanced'],
+    section: 'SingleView Setup',
+    values: { 'SingleView Setup Type': 'MasterTag Enabled', 'SingleView Integration Status': 'New' }
+  },
+
   selectors: {
     // The visible record page. Lightning keeps recently viewed records in the page, hidden.
     activeRoot: '.oneContent.active',

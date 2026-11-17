@@ -43,9 +43,10 @@
     'scan-mismatch': 'Scan result was for another advertiser',
     'scan-interrupted': 'Posting the scan result was interrupted',
     'tabs-failed': "Tabs couldn't be opened",
-    'setup-page-failed': 'A setup page needed a look'
+    'setup-page-failed': 'A setup page needed a look',
+    'setup-cancelled': 'Setup cancelled'
   };
-  const CODES = new Set(['unconfirmed', 'tabs-failed', 'setup-page-failed', 'other', ...REASONS.map(([code]) => code)]);
+  const CODES = new Set(['unconfirmed', 'tabs-failed', 'setup-page-failed', 'setup-cancelled', 'other', ...REASONS.map(([code]) => code)]);
 
   function reasonCode(reason) {
     const text = String(reason ?? '').trim();
