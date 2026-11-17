@@ -414,6 +414,18 @@ test('runner: tabs open one at a time, and a page still on Awin\'s sign-in redir
   assert.match(r.context.notified.message, /7 filled \(not saved\), 2 skipped, 1 need a look/);
 });
 
+test('runner: a page that never answers is given up on after the time limit, and the run carries on', async () => {
+  const r = runner((index, m) => {
+    if (m.action === 'tcaSetupFill') return index === 8 ? new Promise(() => {}) : {status: 'filled', message: 'Filled.'};
+    return {ok: true};
+  });
+  r.context.TCASetupRunner.T.pageLimit = 50;
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false});
+  for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
+  assert.match(r.context.notified.message, /Advertiser settings: No result after 0 s\. If your Awin session has expired, sign in/);
+  assert.equal(r.created.length, 10, 'the last page was still done');
+});
+
 test('runner: gives up on pre-join after 5 attempts and says so', async () => {
   const {context, start} = runner((index, m) => {
     if (m.action === 'tcaSetupFill') return index === 9 ? {status: 'saving', page: 'prejoin'} : {status: 'skipped', message: 'Skipped.'};

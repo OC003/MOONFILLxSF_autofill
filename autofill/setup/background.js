@@ -6,7 +6,7 @@
 (function () {
   const PAGES = ['Tracking settings', 'Invite user', 'Commission groups', 'Plugin store', 'Tracking tag settings',
     'Account details', 'Fee manager', 'Mobile tracking', 'Advertiser settings', 'Pre-join publishers'];
-  const T = { load: 30000, settle: 4000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000, signinWaits: 4 };
+  const T = { load: 30000, settle: 4000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000, signinWaits: 4, pageLimit: 120000 };
   // Pages reloaded before filling (by position): Tracking tag settings often doesn't load fully first time.
   const RELOAD_FIRST = new Set([4]);
   // Pages that come pre-filled (Invite user, Fee manager): opened for reference, never filled.
@@ -144,7 +144,11 @@
           await reload(tabs[i].id);
         }
         await sleep(T.settle);
-        result = await runPage(tabs[i].id, values, save);
+        // A page that never answers (for example after the Awin session expired) can't hold up the run.
+        let timer;
+        const limit = new Promise(resolve => { timer = setTimeout(() => resolve({ status: 'failed', message: `No result after ${Math.round(T.pageLimit / 1000)} s. If your Awin session has expired, sign in and run the setup again.` }), T.pageLimit); });
+        result = await Promise.race([runPage(tabs[i].id, values, save), limit]);
+        clearTimeout(timer);
       } catch (error) {
         result = { status: 'failed', message: `Unexpected error: ${error.message}` };
       }
