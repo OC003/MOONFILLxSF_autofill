@@ -345,7 +345,7 @@ test('after Save, an error on the page is reported as failed', async () => {
 // An ag-Grid like Awin's commission groups: headings with col-ids; cells only become editable after
 // "Edit Commission Groups", and then open an editor on double-click: a popup list for the two
 // dropdown columns, an inline box for Publisher Commission (Enter commits).
-function agGridPage({add = false, rows = 1, commitKey = 'Enter'} = {}) {
+function agGridPage({add = false, rows = 1, commitKey = 'Enter', till = false} = {}) {
   const cols = [['name', 'Name'], ['desc', 'Description'], ['code', 'Group code'], ['txn', 'Transaction Type'], ['type', 'Commission Type'], ['rate', 'Publisher Commission']];
   const row = i => `<div class="ag-row" role="row" row-index="${i}">${cols.map(([id], c) => `<div class="ag-cell" role="gridcell" col-id="${id}" aria-colindex="${c + 1}">${id === 'name' ? 'Default' : ''}</div>`).join('')}</div>`;
   return awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
@@ -366,7 +366,9 @@ function agGridPage({add = false, rows = 1, commitKey = 'Enter'} = {}) {
        document.querySelector('.ag-popup-editor').addEventListener('click', ev => { const item = ev.target.closest('.ag-list-item'); if (!item) return; cell.textContent = item.textContent; cell.classList.remove('ag-cell-popup-editing'); ev.currentTarget.remove(); });
      } else if (id === 'rate') {
        cell.classList.add('ag-cell-inline-editing'); cell.innerHTML = '<input type="text" class="ag-input-field-input">';
-       cell.querySelector('input').addEventListener('keydown', ev => { if (ev.key === ${JSON.stringify(commitKey)}) { const v = ev.target.value; cell.classList.remove('ag-cell-inline-editing'); cell.textContent = v + '%'; } });
+       // Awin's box fills in from the right like a till: the digits typed, divided by 100, as a percentage.
+       if (${till}) cell.querySelector('input').addEventListener('input', ev => { const d = ev.target.value.replace(/\D/g, ''); ev.target.value = d ? (d / 100).toFixed(2) + '%' : ''; });
+       cell.querySelector('input').addEventListener('keydown', ev => { if (ev.key === ${JSON.stringify(commitKey)}) { const v = ev.target.value.replace(/%$/, ''); cell.classList.remove('ag-cell-inline-editing'); cell.textContent = v + '%'; } });
      }
    });`);
 }
@@ -376,7 +378,7 @@ test('commission groups (ag-Grid): Edit Commission Groups, then each cell is ope
   const w = agGridPage();
   const result = await fill(w);
   assert.equal(result.status, 'filled', result.message);
-  assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.5%']);
+  assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.50%']);
   assert.match(result.message, /Transaction Type set to "Sale", Commission Type set to "Percentage", Publisher commission set to "7\.5"/);
   assert.deepEqual([...w.document.querySelectorAll('.ag-cell')].slice(0, 3).map(c => c.textContent), ['Default', '', ''], 'the first three cells are left alone');
 });
@@ -385,7 +387,7 @@ test('commission groups (ag-Grid): on a new programme, Add Default Commission Gr
   const w = agGridPage({add: true});
   const result = await fill(w);
   assert.equal(result.status, 'filled', result.message);
-  assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.5%']);
+  assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.50%']);
 });
 
 test('commission groups (ag-Grid): if the cells already show these values, there is nothing to save, and that is not a failure', async () => {
@@ -400,11 +402,19 @@ test('tracking tag settings: no confirmation after Save, but no error either, co
   assert.equal((await w.TCASetupFill.verifyPage(VALUES)).status, 'saved');
 });
 
+test('commission groups (ag-Grid): a till-style number box (5 → 0.05%) is given 5.00 so it holds 5%', async () => {
+  const w = agGridPage({till: true});
+  const result = await fill(w, {...VALUES, publisherCommission: '5'});
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(agValues(w)[2], '5.00%');
+  assert.match(result.message, /Publisher commission set to "5" \(Enter\)/);
+});
+
 test('commission groups (ag-Grid): if Enter doesn\'t finish the edit, Tab is tried', async () => {
   const w = agGridPage({commitKey: 'Tab'});
   const result = await fill(w);
   assert.equal(result.status, 'filled', result.message);
-  assert.equal(agValues(w)[2], '7.5%');
+  assert.equal(agValues(w)[2], '7.50%');
   assert.match(result.message, /Publisher commission set to "7\.5" \(Tab\)/);
 });
 
@@ -414,7 +424,7 @@ test('commission groups (ag-Grid): if no way of finishing the edit works, the re
   const result = await fill(w);
   assert.equal(result.status, 'failed');
   assert.match(result.message, /"Publisher commission" doesn't show "7\.5"/);
-  assert.match(result.diagnostics, /Publisher commission: Enter in input\.ag-input-field-input\[type=text\] \(box held "7\.5"\): cell shows ""; Tab in /);
+  assert.match(result.diagnostics, /Publisher commission: Enter in input\.ag-input-field-input\[type=text\] \(box held "7\.50"\): cell shows ""; Tab in /);
 });
 
 test('Awin\'s OIDC sign-in callbacks count as sign-in pages, so the run waits for them', async () => {

@@ -404,7 +404,23 @@
     for (const type of ['keyup', 'change']) el.dispatchEvent(new win.Event(type, { bubbles: true }));
   }
 
-  // A typed cell: tries the ways a grid finishes an edit (Enter, Tab, clicking away) until the cell
+  // Masked number boxes reformat what they're given: Awin's fills in from the right like a till, so
+  // "5" becomes 0.05%. Tries the shapes such a box may expect (5.00, 500, 5) until it holds the number,
+  // judged by what the box shows. Text that isn't a number is put in as it is.
+  const numberIn = text => parseFloat(String(text ?? '').replace(',', '.').replace(/[^\d.-]/g, ''));
+  async function typeNumberInto(editor, value) {
+    const n = numberIn(value);
+    if (Number.isNaN(n) || !/^\s*-?[\d.,]+\s*%?\s*$/.test(String(value))) { gridType(editor, value); return true; }
+    for (const shape of [n.toFixed(2), String(Math.round(n * 100)), String(value).trim()]) {
+      gridType(editor, '');
+      gridType(editor, shape);
+      await sleep(150);
+      if (numberIn(editor.value) === n) return true;
+    }
+    return false;
+  }
+
+  // A typed cell: tries the ways a grid finishes an edit (Enter, then Tab) until the cell
   // shows the value. What each try left in the cell goes into the report if none works.
   async function agTypeAndCommit(index, colId, value, name, firstEditor) {
     const cellNow = () => agCell(index, colId);
@@ -417,17 +433,18 @@
       cell.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       return waitFor(() => agEditor(cellNow() || cell), 1500);
     };
+    // Clicking away isn't one of the ways: on Awin's grid it throws the edit away.
     const ways = [
       ['Enter', el => press(el, 'Enter')],
-      ['Tab', el => press(el, 'Tab')],
-      ['clicking away', el => { if (el.blur) el.blur(); clickLikeUser(doc().body); }]
+      ['Tab', el => press(el, 'Tab')]
     ];
     for (const [how, finish] of ways) {
       const editor = tries.length ? await reopen() : firstEditor;
       if (!editor) { tries.push(`${how}: the cell didn't open again`); continue; }
       const kind = `${describeEl(editor)}${editor.type ? `[type=${editor.type}]` : ''}`;
-      gridType(editor, value);
+      const typed = await typeNumberInto(editor, value);
       const held = editor.value;
+      if (!typed) { tries.push(`${how} in ${kind}: the box wouldn't hold ${value} (it held "${held}")`); press(editor, 'Escape'); await sleep(300); continue; }
       finish(editor);
       await waitFor(() => { const c = cellNow(); return c && !editing(c); }, 1500);
       const c = cellNow();
@@ -463,10 +480,7 @@
     changed += await agEdit(index, columns[2], v.publisherCommission, 'Publisher commission');
     // Nothing to change means nothing to save (Save stays greyed out): that's not a failure.
     if (!changed) return { status: 'skipped', message: 'Already set to these values: nothing to save.' };
-    // Leave the grid so it finishes editing and the page registers the changes.
-    // (Not a heading: clicking one would sort the table.)
-    if (doc().activeElement && doc().activeElement.blur) doc().activeElement.blur();
-    clickLikeUser(doc().body);
+    // Give the page a moment to register the edits before Save (clicking away would undo an edit).
     await sleep(800);
     return { note: commissionLog.filter(l => / set to /.test(l)).join(', ') + '.' };
   }
