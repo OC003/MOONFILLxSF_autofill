@@ -151,30 +151,51 @@
 
   const append = v => (v.platformOffer === 'Access' ? PLATFORM_APPEND.Access : PLATFORM_APPEND.other);
 
+  // Page 1's fields: by id (from the page check), or by label if the id differs.
+  const TRACKING = [
+    ['MainWebsiteURL', 'Website URL', 'text'],
+    ['GlobalClickThroughPage', 'Landing Page', 'text'],
+    ['ClickAppend', 'Default Query String Append', 'text'],
+    ['DeeplinkEnabled', 'Enable Link Builder for publishers', 'tick'],
+    ['NoDomainDeeplink', 'Use relative URLs for deep links', 'tick']
+  ];
+  const trackingField = (id, label, kind) => byId(id) || fieldByLabel(label, kind === 'text' ? 'input:not([type="hidden"]):not([type="checkbox"]), textarea' : 'input[type="checkbox"]');
+  const trackingValues = v => ({ MainWebsiteURL: v.websiteUrl, GlobalClickThroughPage: v.landingPage, ClickAppend: append(v) });
+
   const PAGES = [
     {
       key: 'tracking', name: 'Tracking settings', match: /\/tracking-settings\/.*\/main-settings/,
+      // The values come from the setup form (Salesforce); here they're typed into the page's boxes.
+      // The page draws its form a moment after loading, so wait for the boxes before giving up.
       async fill(v) {
-        const fields = { MainWebsiteURL: ['Website URL', v.websiteUrl], GlobalClickThroughPage: ['Landing Page', v.landingPage], ClickAppend: ['Default Query String Append', append(v)] };
-        const found = Object.fromEntries(Object.keys(fields).map(id => [id, byId(id)]));
-        for (const [id, [name]] of Object.entries(fields)) if (!found[id]) fail(`"${name}" not found on the page.`);
-        for (const id of ['DeeplinkEnabled', 'NoDomainDeeplink']) if (!byId(id)) fail(`"${id}" tick box not found on the page.`);
-        for (const [id, [name, value]] of Object.entries(fields)) await setText(found[id], value, name);
-        ensureChecked(byId('DeeplinkEnabled'), 'Enable Link Builder for publishers');
-        ensureChecked(byId('NoDomainDeeplink'), 'Use relative URLs for deep links');
+        const missing = () => TRACKING.filter(([id, label, kind]) => !trackingField(id, label, kind)).map(([, label]) => label);
+        await waitFor(() => !missing().length, 15000);
+        if (missing().length) fail(`${missing().map(l => `"${l}"`).join(', ')} not found on the page (waited 15 s for it to load).`);
+        const values = trackingValues(v);
+        for (const [id, label, kind] of TRACKING) {
+          if (kind === 'text') await setText(trackingField(id, label, kind), values[id], label);
+          else ensureChecked(trackingField(id, label, kind), label);
+        }
       },
       save: () => button('Save'),
-      verify: v => [byId('MainWebsiteURL')?.value === v.websiteUrl, byId('GlobalClickThroughPage')?.value === v.landingPage, byId('ClickAppend')?.value === append(v), byId('DeeplinkEnabled')?.checked, byId('NoDomainDeeplink')?.checked]
+      verify: v => {
+        const values = trackingValues(v);
+        return TRACKING.map(([id, label, kind]) => { const el = trackingField(id, label, kind); return el && (kind === 'text' ? el.value === values[id] : el.checked); });
+      }
     },
     { key: 'invite', name: 'Invite user', match: /\/settings\/invite-user/, skip: () => 'comes pre-filled' },
     {
       key: 'commission', name: 'Commission groups', match: /\/commission-manager\/.*\/commission-groups/,
       async fill(v) {
-        if (!labelElement('Transaction Type')) {
-          const edit = button('Edit Commission Groups');
-          if (edit) { clickLikeUser(edit); await waitFor(() => labelElement('Transaction Type'), 5000); }
+        // The fields appear once "Add Default Commission Group" (or, on an existing programme,
+        // "Edit Commission Groups") has been clicked.
+        await waitFor(() => labelElement('Transaction Type') || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
+        for (const name of ['Add Default Commission Group', 'Edit Commission Groups']) {
+          if (labelElement('Transaction Type')) break;
+          const open = button(name);
+          if (open) { clickLikeUser(open); await waitFor(() => labelElement('Transaction Type'), 8000); }
         }
-        if (!labelElement('Transaction Type')) fail('"Transaction Type" not found on the page, even after clicking Edit Commission Groups.');
+        if (!labelElement('Transaction Type')) fail('"Transaction Type" not found on the page, even after clicking Add Default Commission Group.');
         await choose(fieldByLabel('Transaction Type', TRIGGER), v.transactionType, 'Transaction Type');
         await choose(fieldByLabel('Commission Type', TRIGGER), v.commissionType, 'Commission Type');
         await setText(fieldByLabel('Publisher Commission', 'input:not([type="hidden"]), [contenteditable="true"]'), v.publisherCommission, 'Publisher commission');

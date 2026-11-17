@@ -51,6 +51,21 @@ test('tracking settings: URLs, the query string by Platform Offer, two tick boxe
   assert.equal((await w.TCASetupFill.verifyPage({...VALUES, platformOffer: 'Access'})).status, 'saved');
 });
 
+test('tracking settings: waits for a new programme\'s form to appear, and finds boxes by label if their ids differ', async () => {
+  const w = awin('/tracking-settings/us/awin/advertiser/123456/main-settings', '<div id="app">Loading…</div>',
+    `setTimeout(() => { document.getElementById('app').innerHTML =
+      '<label for="w">Website URL</label><input id="w" type="text">' +
+      '<label for="l">Landing Page</label><input id="l" type="text">' +
+      '<label for="q">Default Query String Append</label><input id="q" type="text">' +
+      '<label><input type="checkbox" id="d"> Enable Link Builder for publishers</label>' +
+      '<label><input type="checkbox" id="r"> Use relative URLs for deep links</label>'; }, 400);`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  const $ = id => w.document.getElementById(id);
+  assert.deepEqual([$('w').value, $('l').value, $('q').value, $('d').checked, $('r').checked],
+    [VALUES.websiteUrl, VALUES.landingPage, 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!', true, true]);
+});
+
 test('pages that come pre-filled are skipped, and the plugin is skipped for Access', async () => {
   assert.equal((await fill(awin('/awin/merchant/123456/settings/invite-user', '<input id="email">'))).status, 'skipped');
   assert.equal((await fill(awin('/provider/finance/fee-manager/en/123456', ''))).status, 'skipped');
@@ -79,6 +94,19 @@ test('commission groups: opens the edit view, then fills the two custom dropdown
   assert.equal(result.status, 'filled', result.message);
   const values = [...w.document.querySelectorAll('.ng-value')].map(v => v.textContent);
   assert.deepEqual(values, ['Sale', 'Percentage']);
+  assert.equal(w.document.querySelector('.rate').value, '7.5');
+});
+
+test('commission groups on a new programme: clicks "Add Default Commission Group" to show the fields', async () => {
+  const w = awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
+    <button type="button" class="btn" id="add">Add Default Commission Group</button>
+    <div id="editor" hidden>${customDropdown('Transaction Type', ['Sale', 'Lead'])}${customDropdown('Commission Type', ['Fixed', 'Percentage'])}
+      <div class="field"><label>Publisher Commission</label><input type="text" class="rate"></div><button type="button">Save</button></div>`,
+  `${dropdownScript} document.getElementById('add').addEventListener('click', () => { document.getElementById('editor').hidden = false; window.added = (window.added || 0) + 1; });`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.added, 1, 'clicked once');
+  assert.deepEqual([...w.document.querySelectorAll('.ng-value')].map(v => v.textContent), ['Sale', 'Percentage']);
   assert.equal(w.document.querySelector('.rate').value, '7.5');
 });
 
