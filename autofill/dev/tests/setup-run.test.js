@@ -138,6 +138,21 @@ test('plugin store: dismisses the new-Awin prompt, adds the R.O.EYE plugin with 
   assert.equal(w.saved, true);
 });
 
+test('plugin store: the code goes into a code editor (CodeMirror-style), and is retyped if the page redraws the form', async () => {
+  const w = awin('/advertiser-mastertag/us/awin/123456/plugins', `
+    <a class="btn btn-sm btn-icon" id="add">Add Plugin</a>
+    <div class="modal" id="menu" hidden><select id="pick"><option>Choose…</option><option>R.O.EYE - Consent - SingleView</option></select>
+      <div id="config"></div><button type="button" id="save">Save</button></div>`,
+  `const draw = () => { document.getElementById('config').innerHTML = '<div class="CodeMirror"><textarea style="position:absolute"></textarea><div class="CodeMirror-code"></div></div>'; };
+   document.addEventListener('input', e => { const cm = e.target.closest('.CodeMirror'); if (cm) cm.querySelector('.CodeMirror-code').textContent = e.target.value; });
+   document.getElementById('add').addEventListener('click', () => { document.getElementById('menu').hidden = false; });
+   // Choosing the plugin draws its settings, then redraws them once a little later (clearing what was typed).
+   document.getElementById('pick').addEventListener('change', () => { draw(); setTimeout(draw, 1500); });`);
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.document.querySelector('.CodeMirror-code').textContent, 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};');
+});
+
 test('tracking tag settings: the dropdown offering "Conversion Tag and Image Pixel integrated" is set', async () => {
   const w = awin('/advertiser-mastertag/us/awin/123456/trackingtagsettings', `${customDropdown('Integration', ['Conversion Tag only', 'Conversion Tag and Image Pixel integrated'])}<button type="button">Save</button>`, dropdownScript);
   assert.equal((await fill(w)).status, 'filled');
@@ -206,6 +221,7 @@ function runner(answers) {
       create: async o => { const tab = {id: 100 + created.length, ...o}; created.push(tab); return tab; },
       get: async id => ({id, status: 'complete'}),
       group: async () => 1,
+      reload: async id => { context.reloaded.push(id); },
       sendMessage: async (tabId, m) => { sent.push([tabId, m.action, m.symbol || m.status || m.index]); return answers(tabId - 100, m); },
       onUpdated: {addListener: () => {}, removeListener: () => {}}
     },
@@ -213,10 +229,11 @@ function runner(answers) {
     notifications: {create: (id, o) => { context.notified = o; }}
   };
   context.usage = [];
+  context.reloaded = [];
   context.TCAUsageWorker = {add: e => context.usage.push(e)};
   vm.runInContext('const NI_URLS = mid => Array.from({length: 10}, (_, i) => `https://ui.awin.com/page${i}/${mid}`);', context);
   vm.runInContext(read('setup/background.js'), context);
-  Object.assign(context.TCASetupRunner.T, {settle: 1, reloadStart: 5, answer: 50, retryWait: 1});
+  Object.assign(context.TCASetupRunner.T, {settle: 1, reloadStart: 5, answer: 50, retryWait: 1, reloadDelay: 1});
   const start = message => new Promise(resolve => listeners[0](message, {tab: {id: 7}}, resolve));
   return {context, sent, created, start};
 }
@@ -239,6 +256,7 @@ test('runner: opens the 10 pages, does them one at a time, retries pre-join, car
   assert.deepEqual(plain(await start({action: 'tcaSetupRun', mid: '123456', values: VALUES, save: true})), {ok: true});
   for (let i = 0; i < 200 && !context.notified; i++) await tick(10);
   assert.equal(created.length, 10);
+  assert.deepEqual(plain(context.reloaded), [104], 'Tracking tag settings (page 5) is reloaded before filling, and only it');
   assert.ok(created.every(t => t.active === false), 'tabs open in the background');
   const order = sent.filter(([, action]) => action === 'tcaSetupFill').map(([tab]) => tab);
   assert.deepEqual(order, [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 109, 109], 'one page at a time; pre-join tried 3 times');

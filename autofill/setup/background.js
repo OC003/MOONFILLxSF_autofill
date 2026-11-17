@@ -6,7 +6,9 @@
 (function () {
   const PAGES = ['Tracking settings', 'Invite user', 'Commission groups', 'Plugin store', 'Tracking tag settings',
     'Account details', 'Fee manager', 'Mobile tracking', 'Advertiser settings', 'Pre-join publishers'];
-  const T = { load: 30000, settle: 1500, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000 };
+  const T = { load: 30000, settle: 1500, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000 };
+  // Pages reloaded before filling (by position): Tracking tag settings often doesn't load fully first time.
+  const RELOAD_FIRST = new Set([4]);
   const SYMBOL = { saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠' };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -35,6 +37,22 @@
       };
       chrome.tabs.onUpdated.addListener(onUpdated);
       timer = setTimeout(finish, T.reloadStart);
+    });
+  }
+
+  // Reloads a tab and resolves once it has loaded again.
+  function reload(tabId) {
+    return new Promise(resolve => {
+      let timer;
+      const onUpdated = (id, info) => {
+        if (id !== tabId || info.status !== 'loading') return;
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        waitForLoad(tabId).then(resolve);
+      };
+      chrome.tabs.onUpdated.addListener(onUpdated);
+      timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(onUpdated); waitForLoad(tabId).then(resolve); }, T.reloadStart);
+      chrome.tabs.reload(tabId).catch(() => {});
     });
   }
 
@@ -88,6 +106,11 @@
       let result;
       try {
         await waitForLoad(tabs[i].id);
+        if (RELOAD_FIRST.has(i)) {
+          progress({ index: i, name: PAGES[i], status: 'working', message: 'reloading the page first' });
+          await sleep(T.reloadDelay);
+          await reload(tabs[i].id);
+        }
         await sleep(T.settle);
         result = await runPage(tabs[i].id, values, save);
       } catch (error) {
@@ -125,5 +148,5 @@
     return undefined;
   });
 
-  globalThis.TCASetupRunner = { run, PAGES, T };   // for tests
+  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST };   // for tests
 })();

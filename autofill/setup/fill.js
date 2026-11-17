@@ -74,6 +74,43 @@
     if (now.trim() !== String(value).trim()) fail(`"${name}" didn't keep its new value.`);
   }
 
+  // Where code goes: a code editor (CodeMirror, Ace, Monaco) or a plain text box, inside scope.
+  const EDITORS = [
+    ['.cm-editor', '.cm-content', 'CodeMirror'],
+    ['.CodeMirror', 'textarea', 'CodeMirror'],
+    ['.ace_editor', 'textarea', 'Ace'],
+    ['.monaco-editor', 'textarea', 'Monaco']
+  ];
+  function codeBox(scope) {
+    for (const [wrap, input, kind] of EDITORS) {
+      const editor = all(scope, wrap).filter(visible).pop();
+      const el = editor && all(editor, input)[0];
+      if (el) return { el, editor, kind };
+    }
+    const box = all(scope, 'textarea, [contenteditable="true"]').filter(visible).filter(el => !inSwitcher(el)).pop();
+    return box ? { el: box, editor: null, kind: box.tagName === 'TEXTAREA' ? 'text box' : 'editable box' } : null;
+  }
+  const squash = text => String(text ?? '').replace(/[\s\u00a0\u200b]+/g, '');
+  const codeShown = box => squash(box.editor ? cleanText(box.editor, NOISE) || box.el.value : box.el.isContentEditable ? box.el.textContent : box.el.value).includes(squash(PLUGIN.code));
+
+  // Types code the way a person would (so editors and page frameworks register it), falling back to
+  // setting the value directly where typing isn't available.
+  function typeCode(box, code) {
+    const { el } = box;
+    el.focus();
+    let typed = false;
+    try {
+      if (typeof doc().execCommand === 'function') {
+        if (el.select && !box.editor) el.select(); else doc().execCommand('selectAll', false, null);
+        typed = doc().execCommand('insertText', false, code);
+      }
+    } catch { typed = false; }
+    if (!typed || !codeShown(box)) {
+      if (el.isContentEditable) el.textContent = code;
+      else setNative(el, code);
+    }
+  }
+
   function ensureChecked(el, name) {
     if (!el) fail(`"${name}" not found on the page.`);
     if (el.disabled) fail(`"${name}" can't be changed.`);
@@ -119,9 +156,9 @@
   // The dropdown, anywhere on the page, that offers this option.
   async function chooseAnywhere(option, name) {
     const select = shown('select').find(s => [...s.options].some(o => same(o.text, option)));
-    if (select) return chooseNative(select, option, name);
+    if (select) { chooseNative(select, option, name); return select; }
     for (const trigger of shown(TRIGGER)) {
-      try { await choose(trigger, option, name); return; } catch { doc().body.click(); /* close it and try the next one */ }
+      try { await choose(trigger, option, name); return trigger; } catch { doc().body.click(); /* close it and try the next one */ }
     }
     fail(`No dropdown on the page offers "${option}".`);
   }
@@ -150,6 +187,8 @@
   // ---------- the pages, in the order New Implementation opens them ----------
 
   const append = v => (v.platformOffer === 'Access' ? PLATFORM_APPEND.Access : PLATFORM_APPEND.other);
+
+  let pluginScope = null;   // the plugin menu, once open
 
   // Page 1's fields: by id (from the page check), or by label if the id differs.
   const TRACKING = [
@@ -211,16 +250,22 @@
         const add = button('Add Plugin');
         if (!add) fail('The Add Plugin button wasn\'t found.');
         clickLikeUser(add);
-        await waitFor(() => shown(TRIGGER).length || shown('textarea, [contenteditable="true"]').length, 5000);
-        await chooseAnywhere(PLUGIN.name, 'Plugin');
-        const box = await waitFor(() => shown('textarea, [contenteditable="true"], input[type="text"]').filter(el => !inSwitcher(el)).pop(), 3000);
-        await setText(box, PLUGIN.code, 'Plugin code');
+        await waitFor(() => shown(TRIGGER).length, 5000);
+        const dropdown = await chooseAnywhere(PLUGIN.name, 'Plugin');
+        // The plugin's settings (with the code box) are drawn after the plugin is chosen.
+        pluginScope = closest(dropdown, '[role="dialog"], .modal-content, .modal, form, .panel, .card, section') || doc().body;
+        await sleep(1000);
+        const box = await waitFor(() => codeBox(pluginScope) || codeBox(doc().body), 5000);
+        if (!box) fail('The plugin\'s code box wasn\'t found after choosing the plugin.');
+        typeCode(box, PLUGIN.code);
+        // The page sometimes redraws the form just after: check the code is still there, and retype once.
+        await sleep(1000);
+        const again = codeBox(pluginScope) || codeBox(doc().body);
+        if (!again || !codeShown(again)) { if (again) typeCode(again, PLUGIN.code); await sleep(500); }
+        const now = codeBox(pluginScope) || codeBox(doc().body);
+        if (!now || !codeShown(now)) fail(`The plugin code didn't stay in the ${box.kind}.`);
       },
-      save: () => {
-        const box = shown('textarea, [contenteditable="true"]').pop();
-        const scope = (box && closest(box, '[role="dialog"], .modal, .modal-content, form, .panel, .card')) || doc().body;
-        return button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], scope);
-      }
+      save: () => button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], pluginScope || doc().body)
     },
     {
       key: 'tag', name: 'Tracking tag settings', match: /\/advertiser-mastertag\/.*\/trackingtagsettings/,
