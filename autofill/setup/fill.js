@@ -127,8 +127,19 @@
   }
   const findCodeBox = () => setupBox() || codeBox(pluginScope || doc().body) || codeBox(doc().body);
 
+  // Asks the background script to set an editor's text from the page's own side (where the editor's
+  // controls live). The editor is marked with an attribute so it can be found there.
+  async function setThroughEditor(editor, code) {
+    if (!root.chrome || !root.chrome.runtime || !root.chrome.runtime.sendMessage) return { error: 'not available' };
+    editor.setAttribute('data-tca-code-target', '');
+    try { return await root.chrome.runtime.sendMessage({ action: 'tcaSetupSetEditor', code }); }
+    catch (error) { return { error: error.message }; }
+    finally { editor.removeAttribute('data-tca-code-target'); }
+  }
+
   const squash = text => String(text ?? '').replace(/[\s\u00a0\u200b]+/g, '');
-  const codeShown = box => squash(box.editor ? cleanText(box.editor, NOISE) || box.el.value : box.el.isContentEditable ? box.el.textContent : box.el.value).includes(squash(PLUGIN.code));
+  // For a code editor, only what it shows counts: its hidden input box can hold typed text it ignored.
+  const codeShown = box => squash(box.editor ? cleanText(box.editor, NOISE) : box.el.isContentEditable ? box.el.textContent : box.el.value).includes(squash(PLUGIN.code));
 
   // Types code the way a person would (so editors and page frameworks register it), falling back to
   // setting the value directly where typing isn't available.
@@ -235,7 +246,7 @@
   async function clickSave(el, name) {
     if (!el) fail(`The ${name} button wasn't found.`);
     if (el.disabled || el.classList.contains('btn-disabled')) {
-      await waitFor(() => !el.disabled && !el.classList.contains('btn-disabled'), 2000);
+      await waitFor(() => !el.disabled && !el.classList.contains('btn-disabled'), 5000);
       if (el.disabled) fail(`The ${name} button stayed disabled: the page didn't register the changes.`);
     }
     // Answer first: a classic form reloads the page as soon as it's submitted.
@@ -353,7 +364,7 @@
   async function agEdit(index, colId, value, name) {
     let cell = agCell(index, colId);
     if (!cell) fail(`The "${name}" cell wasn't found in the commission table.`);
-    if (shownIn(cell, value)) return;
+    if (shownIn(cell, value)) { commissionLog.push(`${name} already "${value}"`); return false; }
     if (cell.scrollIntoView) cell.scrollIntoView({ block: 'nearest', inline: 'center' });
     const win = cell.ownerDocument.defaultView;
     clickLikeUser(cell);
@@ -378,6 +389,8 @@
     if (editing(cell)) { press(agEditor(cell) || cell, 'Enter'); await sleep(300); }
     const kept = await waitFor(() => shownIn(agCell(index, colId) || cell, value), 2000);
     if (!kept) fail(`"${name}" doesn't show "${value}" after editing the cell.`);
+    commissionLog.push(`${name} set to "${value}"`);
+    return true;
   }
 
   async function agCommission(v) {
@@ -399,9 +412,18 @@
     if (columns.length < 3) fail(`The commission table has ${agCells(rows[0]).length} column(s); expected at least 6.`);
     const index = added[0] || rows.find(i => { const c = agCell(i, columns[2]); return c && !cleanText(c, NOISE); }) || rows[0];
     commissionLog.push(`row ${index} of ${rows.length}, columns ${columns.join(', ')}`);
-    await agEdit(index, columns[0], v.transactionType, 'Transaction Type');
-    await agEdit(index, columns[1], v.commissionType, 'Commission Type');
-    await agEdit(index, columns[2], v.publisherCommission, 'Publisher commission');
+    let changed = 0;
+    changed += await agEdit(index, columns[0], v.transactionType, 'Transaction Type');
+    changed += await agEdit(index, columns[1], v.commissionType, 'Commission Type');
+    changed += await agEdit(index, columns[2], v.publisherCommission, 'Publisher commission');
+    // Nothing to change means nothing to save (Save stays greyed out): that's not a failure.
+    if (!changed) return { status: 'skipped', message: 'Already set to these values: nothing to save.' };
+    // Leave the grid so it finishes editing and the page registers the changes.
+    // (Not a heading: clicking one would sort the table.)
+    if (doc().activeElement && doc().activeElement.blur) doc().activeElement.blur();
+    clickLikeUser(doc().body);
+    await sleep(800);
+    return { note: commissionLog.filter(l => / set to /.test(l)).join(', ') + '.' };
   }
 
   let pluginScope = null;   // the plugin menu, once open
@@ -505,9 +527,18 @@
         await sleep(1000);
         const again = findCodeBox();
         if (!again || !codeShown(again)) { if (again) typeCode(again, PLUGIN.code); await sleep(500); }
-        const now = findCodeBox();
+        let now = findCodeBox();
+        let how = 'typed into';
+        // A code editor in a background tab ignores typing (it only listens while focused): set the
+        // code through the editor itself instead, from the page's own side.
+        if (now && now.editor && !codeShown(now)) {
+          const answer = await setThroughEditor(now.editor, PLUGIN.code);
+          await sleep(500);
+          now = findCodeBox();
+          how = `set through the editor (${answer && (answer.editor || answer.error) || 'no answer'}) in`;
+        }
         if (!now || !codeShown(now)) fail(`The plugin code didn't stay in the ${box.kind} (${describeBox(now || box)}).`);
-        return { note: `Code typed into: ${describeBox(now)}.` };
+        return { note: `Code ${how}: ${describeBox(now)}.` };
       },
       save: () => button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], pluginScope || doc().body)
     },
@@ -517,7 +548,9 @@
         await waitFor(() => shown(TRIGGER).length, 8000);
         await chooseAnywhere('Conversion Tag and Image Pixel integrated', 'Tracking tag');
       },
-      save: () => button(['Save', 'Save changes', 'Update'])
+      save: () => button(['Save', 'Save changes', 'Update']),
+      // This page shows no confirmation after saving; no error shown counts as saved.
+      verify: () => [!errorShown()]
     },
     {
       key: 'account', name: 'Account details', match: /\/merchant-settings\/.*\/account-details/,

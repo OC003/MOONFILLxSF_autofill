@@ -174,6 +174,36 @@
     return results;
   }
 
+  // Runs in the page's own world (not the extension's), where code editors keep their controls:
+  // sets the text of the editor marked data-tca-code-target. CodeMirror 5 and 6, Ace and Monaco.
+  function setEditorInPage(code) {
+    const el = document.querySelector('[data-tca-code-target]');
+    if (!el) return { error: 'editor not found' };
+    try {
+      if (el.CodeMirror && el.CodeMirror.setValue) { el.CodeMirror.setValue(code); if (el.CodeMirror.save) el.CodeMirror.save(); return { editor: 'CodeMirror' }; }
+      const cm6 = el.cmView && el.cmView.view || (el.querySelector('.cm-content') || {}).cmView && el.querySelector('.cm-content').cmView.view;
+      if (cm6 && cm6.dispatch) { cm6.dispatch({ changes: { from: 0, to: cm6.state.doc.length, insert: code } }); return { editor: 'CodeMirror 6' }; }
+      if (el.env && el.env.editor && el.env.editor.setValue) { el.env.editor.setValue(code, 1); return { editor: 'Ace' }; }
+      if (window.ace && window.ace.edit && el.classList.contains('ace_editor')) { window.ace.edit(el).setValue(code, 1); return { editor: 'Ace' }; }
+      if (window.monaco && window.monaco.editor) {
+        const editor = window.monaco.editor.getEditors().find(e => el.contains(e.getDomNode()) || e.getDomNode().contains(el));
+        if (editor) { editor.setValue(code); return { editor: 'Monaco' }; }
+      }
+      return { error: 'no editor controls found' };
+    } catch (error) {
+      return { error: String(error.message || error) };
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'tcaSetupSetEditor') return undefined;
+    const tab = sender && sender.tab;
+    if (!tab || !/^https:\/\/ui\.awin\.com\//.test(sender.url || tab.url || '')) { sendResponse({ error: 'not an Awin page' }); return undefined; }
+    chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [sender.frameId || 0] }, world: 'MAIN', func: setEditorInPage, args: [String(message.code)] })
+      .then(([frame]) => sendResponse((frame && frame.result) || { error: 'no result' }), error => sendResponse({ error: error.message }));
+    return true;
+  });
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.action !== 'tcaSetupRun') return undefined;
     const mid = String(message.mid || '').replace(/\D/g, '');
@@ -184,5 +214,5 @@
     return undefined;
   });
 
-  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST };   // for tests
+  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST, setEditorInPage };   // for tests
 })();

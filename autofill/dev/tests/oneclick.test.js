@@ -132,7 +132,8 @@ test('manifest: Moonfill entries unchanged; autofill added as its own content sc
   ]);
   assert.deepEqual(manifest.content_scripts[2].js, ['fields.js', 'config.js', 'settings.js', 'templates.js', 'engine.js', 'content.js', 'setup/form.js'].map(f => 'autofill/' + f));
   assert.deepEqual(manifest.optional_host_permissions, ['https://*/*', 'http://*/*'], 'reading client sites is optional, granted in Settings');
-  assert.equal(manifest.host_permissions.length, 4, "Moonfill's own site access unchanged");
+  assert.deepEqual(manifest.host_permissions.slice(0, 4), ['https://forms.office.com/*', 'https://forms.cloud.microsoft/*', 'https://awin.lightning.force.com/*', 'https://zanox.sharepoint.com/*'], "Moonfill's own site access unchanged");
+  assert.deepEqual(manifest.host_permissions.slice(4), ['https://ui.awin.com/*'], 'plus the Awin setup pages (to set code editors from the page side)');
   assert.equal(manifest.background.service_worker, 'background.js');
   assert.match(read('../../background.js'), /\ntry \{ importScripts\("autofill\/background\.js"\); \}/, "Moonfill's background loads the checklist's");
   assert.deepEqual(manifest.content_scripts[2].matches, ['https://awin.lightning.force.com/*', 'file:///*/autofill/dev/mock/*.html*']);

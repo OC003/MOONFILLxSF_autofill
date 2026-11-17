@@ -231,6 +231,62 @@ test('plugin store: the code goes into the box titled "Set-up", not another box 
   assert.match(result.message, /Code typed into: "Set-up" CodeMirror editor/);
 });
 
+// A CodeMirror 5-style editor that ignores typing in a background tab (as on Awin): only its own
+// setValue changes it. The page's side is simulated by running setEditorInPage in the page.
+function unfocusedEditorPage() {
+  const w = awin('/advertiser-mastertag/us/awin/123456/plugins', `
+    <a class="btn" id="add">Add Plugin</a>
+    <div class="modal" id="menu" hidden><select><option>Choose…</option><option>R.O.EYE - Consent - SingleView</option></select>
+      <div class="block"><h4>Set-up</h4><div class="CodeMirror" id="cm"><textarea></textarea><div class="CodeMirror-code"></div></div></div>
+      <button type="button">Save</button></div>`,
+  `document.getElementById('add').addEventListener('click', () => { document.getElementById('menu').hidden = false; });
+   const cm = document.getElementById('cm');
+   cm.CodeMirror = { value: '', setValue(v) { this.value = v; cm.querySelector('.CodeMirror-code').textContent = v; }, save() {} };`);
+  return w;
+}
+
+test('plugin store: when the code editor ignores typing, the code is set through the editor itself', async () => {
+  const w = unfocusedEditorPage();
+  const {context} = runner(() => ({ok: true}));
+  const inPage = w.eval(`(${context.TCASetupRunner.setEditorInPage.toString()})`);
+  const asked = [];
+  w.chrome = {runtime: {sendMessage: async m => { asked.push(m.action); return inPage(m.code); }}};
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.deepEqual(asked, ['tcaSetupSetEditor']);
+  assert.equal(w.document.querySelector('.CodeMirror-code').textContent, 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};');
+  assert.equal(w.document.getElementById('cm').CodeMirror.value, 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};');
+  assert.equal(w.document.querySelector('[data-tca-code-target]'), null, 'the marker is removed afterwards');
+  assert.match(result.message, /Code set through the editor \(CodeMirror\) in: "Set-up" CodeMirror editor/);
+});
+
+test('plugin store: if the editor can\'t be set either, the page stops before saving and says why', async () => {
+  const w = unfocusedEditorPage();
+  w.chrome = {runtime: {sendMessage: async () => ({error: 'no editor controls found'})}};
+  const result = await fill(w, VALUES, true);
+  assert.equal(result.status, 'failed');
+  assert.match(result.message, /The plugin code didn't stay in the "Set-up" CodeMirror editor/);
+});
+
+test('background: sets an editor from the page side only for Awin pages, in the page\'s own world', async () => {
+  const {context} = runner(() => ({ok: true}));
+  const listeners = [];
+  const calls = [];
+  const ctx = vm.createContext({console, setTimeout, clearTimeout, URL});
+  ctx.chrome = {runtime: {onMessage: {addListener: l => listeners.push(l)}}, scripting: {executeScript: async o => { calls.push(o); return [{result: {editor: 'CodeMirror'}}]; }}};
+  vm.runInContext(read('setup/background.js'), ctx);
+  const ask = (message, sender) => new Promise(resolve => { for (const l of listeners) if (l(message, sender, resolve) === true) return; resolve('unanswered'); });
+  const ok = await ask({action: 'tcaSetupSetEditor', code: 'x'}, {tab: {id: 9}, frameId: 0, url: 'https://ui.awin.com/advertiser-mastertag/us/awin/1/plugins'});
+  assert.deepEqual(plain(ok), {editor: 'CodeMirror'});
+  assert.equal(calls[0].world, 'MAIN');
+  assert.deepEqual(plain(calls[0].target), {tabId: 9, frameIds: [0]});
+  assert.deepEqual(plain(calls[0].args), ['x']);
+  const refused = await ask({action: 'tcaSetupSetEditor', code: 'x'}, {tab: {id: 9}, url: 'https://example.com/'});
+  assert.deepEqual(plain(refused), {error: 'not an Awin page'});
+  assert.equal(calls.length, 1);
+  void context;
+});
+
 test('tracking tag settings: the dropdown offering "Conversion Tag and Image Pixel integrated" is set', async () => {
   const w = awin('/advertiser-mastertag/us/awin/123456/trackingtagsettings', `${customDropdown('Integration', ['Conversion Tag only', 'Conversion Tag and Image Pixel integrated'])}<button type="button">Save</button>`, dropdownScript);
   assert.equal((await fill(w)).status, 'filled');
@@ -321,6 +377,7 @@ test('commission groups (ag-Grid): Edit Commission Groups, then each cell is ope
   const result = await fill(w);
   assert.equal(result.status, 'filled', result.message);
   assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.5%']);
+  assert.match(result.message, /Transaction Type set to "Sale", Commission Type set to "Percentage", Publisher commission set to "7\.5"/);
   assert.deepEqual([...w.document.querySelectorAll('.ag-cell')].slice(0, 3).map(c => c.textContent), ['Default', '', ''], 'the first three cells are left alone');
 });
 
@@ -329,6 +386,18 @@ test('commission groups (ag-Grid): on a new programme, Add Default Commission Gr
   const result = await fill(w);
   assert.equal(result.status, 'filled', result.message);
   assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.5%']);
+});
+
+test('commission groups (ag-Grid): if the cells already show these values, there is nothing to save, and that is not a failure', async () => {
+  const w = agGridPage();
+  for (const [id, v] of [['txn', 'Sale'], ['type', 'Percentage'], ['rate', '7.50%']]) w.document.querySelector(`.ag-cell[col-id="${id}"]`).textContent = v;
+  const result = await fill(w, VALUES, true);
+  assert.deepEqual([result.status, result.message], ['skipped', 'Already set to these values: nothing to save.']);
+});
+
+test('tracking tag settings: no confirmation after Save, but no error either, counts as saved', async () => {
+  const w = awin('/advertiser-mastertag/us/awin/123456/trackingtagsettings', '<p>Saved settings page</p>');
+  assert.equal((await w.TCASetupFill.verifyPage(VALUES)).status, 'saved');
 });
 
 // ---------- Background runner ----------
@@ -357,7 +426,7 @@ function runner(answers) {
   vm.runInContext('const NI_URLS = mid => Array.from({length: 10}, (_, i) => `https://ui.awin.com/page${i}/${mid}`);', context);
   vm.runInContext(read('setup/background.js'), context);
   Object.assign(context.TCASetupRunner.T, {settle: 1, reloadStart: 5, answer: 50, retryWait: 1, reloadDelay: 1, signinWaits: 4});
-  const start = message => new Promise(resolve => listeners[0](message, {tab: {id: 7}}, resolve));
+  const start = message => new Promise(resolve => { for (const l of listeners) l(message, {tab: {id: 7}}, resolve); });
   return {context, sent, created, start};
 }
 
