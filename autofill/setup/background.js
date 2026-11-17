@@ -6,9 +6,11 @@
 (function () {
   const PAGES = ['Tracking settings', 'Invite user', 'Commission groups', 'Plugin store', 'Tracking tag settings',
     'Account details', 'Fee manager', 'Mobile tracking', 'Advertiser settings', 'Pre-join publishers'];
-  const T = { load: 30000, settle: 4000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000 };
+  const T = { load: 30000, settle: 4000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000, signinWaits: 4 };
   // Pages reloaded before filling (by position): Tracking tag settings often doesn't load fully first time.
   const RELOAD_FIRST = new Set([4]);
+  // Pages that come pre-filled (Invite user, Fee manager): opened for reference, never filled.
+  const ALWAYS_SKIPPED = new Set([1, 6]);
   const SYMBOL = { saved: '✓', filled: '✎', skipped: '⏭', unconfirmed: '⚠', failed: '⚠' };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -71,10 +73,24 @@
     }
   }
 
+  // Asks the page to fill itself; if it's on Awin's sign-in pages (a redirect still going on), waits
+  // for it to come back to the setup page first.
+  async function fillWhenReady(tabId, values, save) {
+    for (let wait = 0; ; wait++) {
+      const filled = await ask(tabId, { action: 'tcaSetupFill', values, save });
+      if (filled.status !== 'signin') return filled;
+      if (wait >= T.signinWaits) {
+        return { status: 'failed', message: filled.login ? 'Awin asked to sign in again in this tab. Sign in to Awin, then run the setup again.' : `${filled.message} It didn't return to the setup page.` };
+      }
+      await waitAfterSave(tabId);   // a redirect: wait for the next page load
+      await sleep(T.settle);
+    }
+  }
+
   async function runPage(tabId, values, save) {
     let result;
     for (let attempt = 1; attempt <= T.retries; attempt++) {
-      const filled = await ask(tabId, { action: 'tcaSetupFill', values, save });
+      const filled = await fillWhenReady(tabId, values, save);
       if (filled.status !== 'saving') return filled;
       await waitAfterSave(tabId);
       await sleep(T.settle);
@@ -94,17 +110,32 @@
       progress({ done: true, error: 'Moonfill\'s list of New Implementation pages has changed, so the setup can\'t run. Use "Just open the tabs".' });
       return;
     }
+    // Tabs open one at a time, as each page's turn comes: opening all ten at once sends some of them
+    // to Awin's sign-in pages.
     const tabs = [];
-    for (const url of urls) tabs.push(await chrome.tabs.create({ url, active: false }));
-    try {
-      const group = await chrome.tabs.group({ tabIds: tabs.map(t => t.id) });
-      await chrome.tabGroups.update(group, { title: `${mid} setup`, color: 'cyan' });
-    } catch { /* grouping is a nicety */ }
+    let group = null;
+    const open = async i => {
+      const tab = await chrome.tabs.create({ url: urls[i], active: false });
+      tabs[i] = tab;
+      try {
+        if (group === null) { group = await chrome.tabs.group({ tabIds: [tab.id] }); await chrome.tabGroups.update(group, { title: `${mid} setup`, color: 'cyan' }); }
+        else await chrome.tabs.group({ groupId: group, tabIds: [tab.id] });
+      } catch { /* grouping is a nicety */ }
+      return tab;
+    };
 
     const results = [];
-    for (let i = 0; i < tabs.length; i++) {
+    for (let i = 0; i < urls.length; i++) {
       progress({ index: i, name: PAGES[i], status: 'working' });
+      await open(i);
       let result;
+      if (ALWAYS_SKIPPED.has(i)) {
+        result = { status: 'skipped', message: 'Skipped: comes pre-filled.' };
+        results.push({ name: PAGES[i], ...result });
+        chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL.skipped }).catch(() => {});
+        progress({ index: i, name: PAGES[i], status: result.status, message: result.message });
+        continue;
+      }
       try {
         await waitForLoad(tabs[i].id);
         if (RELOAD_FIRST.has(i)) {

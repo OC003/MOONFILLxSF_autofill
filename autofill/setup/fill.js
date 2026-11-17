@@ -300,12 +300,108 @@
     }
     const kinds = el => (el.tagName === 'INPUT' ? `input:${el.type || 'text'}` : describeEl(el));
     const rows = shown(ROW).filter(r => !inSwitcher(r)).map(r => ({ r, boxes: all(r, BOX).filter(visible) })).filter(x => x.boxes.length && !inSwitcher(x.r));
+    if (isAgGrid()) {
+      const idx = agRowIndexes();
+      parts.push(`ag-Grid: ${idx.length} row(s); columns ${shown('.ag-header-cell[col-id]').map(h => `${h.getAttribute('col-id')}="${cleanText(h.querySelector('.ag-header-cell-text') || h, NOISE)}"`).join(', ')}`);
+      if (idx.length) parts.push(`row ${idx[0]} cells: ${agCells(idx[0]).map(c => `${c.getAttribute('col-id')}${c.classList.contains('ag-cell-inline-editing') ? '(editing)' : ''}${all(c, BOX).filter(visible).length ? '(box)' : ''}`).join(', ')}`);
+    }
     parts.push(`${rows.length} row(s) with boxes`);
     for (const { r, boxes } of rows.slice(0, 6)) parts.push(`row ${describeEl(r)}: ${boxes.length} box(es) [${boxes.slice(0, 8).map(kinds).join(', ')}]`);
     const loose = shown(BOX).filter(el => !inSwitcher(el) && !closest(el, ROW));
     if (loose.length) parts.push(`${loose.length} box(es) outside any row: ${loose.slice(0, 8).map(el => `${kinds(el)} in ${chain(el.parentElement)}`).join(' | ')}`);
     parts.push(diagnostics());
     return parts.join('; ').replace(/\d{4,}/g, '#');
+  }
+
+  // ---------- Commission groups as an ag-Grid (spreadsheet-like) table ----------
+  // Cells only become boxes when they're being edited: click (or double-click) a cell, type or pick,
+  // then Enter. Columns are matched by heading (col-id), else by position (4th, 5th, 6th).
+
+  const isAgGrid = () => !!shown('.ag-root, .ag-root-wrapper').length;
+  const press = (el, key) => {
+    const win = el.ownerDocument.defaultView;
+    for (const type of ['keydown', 'keypress', 'keyup']) el.dispatchEvent(new win.KeyboardEvent(type, { key, code: key, bubbles: true, cancelable: true }));
+  };
+  const agRowIndexes = () => [...new Set(shown('.ag-row[row-index]').map(r => r.getAttribute('row-index')))];
+  const agCells = index => shown(`.ag-row[row-index="${index}"] .ag-cell[col-id]`)
+    .sort((a, b) => (+a.getAttribute('aria-colindex') || 0) - (+b.getAttribute('aria-colindex') || 0));
+  function agColumns(index) {
+    const ids = ['Transaction Type', 'Commission Type', 'Publisher Commission'].map(title => {
+      const head = shown('.ag-header-cell[col-id]').find(h => same(cleanText(h.querySelector('.ag-header-cell-text') || h, NOISE), title));
+      return head && head.getAttribute('col-id');
+    });
+    if (ids.every(Boolean)) return ids;
+    return agCells(index).slice(3, 6).map(c => c.getAttribute('col-id'));
+  }
+  const agCell = (index, colId) => shown(`.ag-row[row-index="${index}"] .ag-cell[col-id="${colId}"]`)[0] || null;
+  // The editor that opened for a cell: inside it, or in a popup.
+  function agEditor(cell) {
+    const inside = all(cell, 'select, input:not([type="hidden"]):not([type="checkbox"]), textarea').filter(visible)[0];
+    if (inside) return inside;
+    const popup = shown('.ag-popup-editor, .ag-popup .ag-rich-select, .ag-select-list').pop();
+    return popup ? (all(popup, 'select, input:not([type="hidden"])').filter(visible)[0] || popup) : null;
+  }
+  const agOptions = () => shown('.ag-rich-select-row, .ag-list-item, .ag-select-list-item, [role="option"]');
+  const editing = cell => cell.classList.contains('ag-cell-inline-editing') || cell.classList.contains('ag-cell-popup-editing') || !!agEditor(cell);
+  const shownIn = (cell, value) => {
+    const text = cleanText(cell, NOISE);
+    if (same(text, value)) return true;
+    const n = parseFloat(String(value).replace(',', '.'));
+    return !Number.isNaN(n) && parseFloat(text.replace(',', '.').replace(/[^\d.-]/g, '')) === n;
+  };
+
+  async function agEdit(index, colId, value, name) {
+    let cell = agCell(index, colId);
+    if (!cell) fail(`The "${name}" cell wasn't found in the commission table.`);
+    if (shownIn(cell, value)) return;
+    if (cell.scrollIntoView) cell.scrollIntoView({ block: 'nearest', inline: 'center' });
+    const win = cell.ownerDocument.defaultView;
+    clickLikeUser(cell);
+    let editor = await waitFor(() => agEditor(cell), 800);
+    if (!editor) { cell.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true })); editor = await waitFor(() => agEditor(cell), 1500); }
+    if (!editor) { if (cell.focus) cell.focus(); press(cell, 'Enter'); editor = await waitFor(() => agEditor(cell), 1500); }
+    if (!editor) fail(`The "${name}" cell didn't open for editing (it may be read-only until Edit Commission Groups is clicked).`);
+    if (editor.tagName === 'SELECT') {
+      chooseNative(editor, value, name);
+      press(editor, 'Enter');
+    } else if (editor.tagName === 'INPUT' || editor.tagName === 'TEXTAREA') {
+      const option = () => agOptions().find(o => same(cleanText(o, NOISE), value));
+      if (agOptions().length && !option()) { setNative(editor, value); await sleep(300); }   // a searchable list
+      if (option()) clickLikeUser(option());
+      else { setNative(editor, value); press(editor, 'Enter'); }
+    } else {
+      const option = await waitFor(() => agOptions().find(o => same(cleanText(o, NOISE), value)), 1500);
+      if (!option) fail(`"${name}": option "${value}" isn't available. Options shown: ${agOptions().map(o => cleanText(o, NOISE)).join(', ') || 'none'}.`);
+      clickLikeUser(option);
+    }
+    await waitFor(() => { cell = agCell(index, colId) || cell; return !editing(cell); }, 2000);
+    if (editing(cell)) { press(agEditor(cell) || cell, 'Enter'); await sleep(300); }
+    const kept = await waitFor(() => shownIn(agCell(index, colId) || cell, value), 2000);
+    if (!kept) fail(`"${name}" doesn't show "${value}" after editing the cell.`);
+  }
+
+  async function agCommission(v) {
+    const before = agRowIndexes();
+    for (const name of ['Add Default Commission Group', 'Edit Commission Groups']) {
+      const open = button(name);
+      commissionLog.push(open ? `clicked "${name}" (${describeEl(open)})` : `no "${name}" button`);
+      if (!open) continue;
+      clickLikeUser(open);
+      await sleep(1000);
+      await settled();
+      break;
+    }
+    const rows = agRowIndexes();
+    if (!rows.length) fail('The commission table has no rows to fill in.');
+    // A newly added row if there is one; otherwise the row whose Publisher Commission is empty; else the first.
+    const added = rows.filter(i => !before.includes(i));
+    const columns = agColumns(added[0] || rows[0]);
+    if (columns.length < 3) fail(`The commission table has ${agCells(rows[0]).length} column(s); expected at least 6.`);
+    const index = added[0] || rows.find(i => { const c = agCell(i, columns[2]); return c && !cleanText(c, NOISE); }) || rows[0];
+    commissionLog.push(`row ${index} of ${rows.length}, columns ${columns.join(', ')}`);
+    await agEdit(index, columns[0], v.transactionType, 'Transaction Type');
+    await agEdit(index, columns[1], v.commissionType, 'Commission Type');
+    await agEdit(index, columns[2], v.publisherCommission, 'Publisher commission');
   }
 
   let pluginScope = null;   // the plugin menu, once open
@@ -369,8 +465,9 @@
       // alone and boxes 4, 5, 6 are Transaction Type, Commission Type and Publisher Commission.
       // The row appears after clicking "Add Default Commission Group".
       async fill(v) {
-        await waitFor(() => commissionRow() || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
+        await waitFor(() => isAgGrid() || commissionRow() || button(['Add Default Commission Group', 'Edit Commission Groups']), 10000);
         commissionLog = [];
+        if (isAgGrid()) return agCommission(v);
         for (const name of ['Add Default Commission Group', 'Edit Commission Groups']) {
           if (commissionRow()) break;
           const open = button(name);
@@ -488,7 +585,11 @@
 
   async function fillPage(values, save) {
     const page = pageFor();
-    if (!page) return { status: 'failed', message: `This page isn't one of the setup pages (${root.location.pathname.replace(/\d{4,}/g, '#')}).` };
+    if (!page) {
+      const path = root.location.pathname.replace(/\d{4,}/g, '#');
+      if (/authori[sz]e|login|\/idp\//i.test(path)) return { status: 'signin', message: `Awin's sign-in page is showing (${path}).`, login: /login/i.test(path) };
+      return { status: 'failed', message: `This page isn't one of the setup pages (${path}).` };
+    }
     const why = page.skip && page.skip(values);
     if (why) return { status: 'skipped', message: `Skipped: ${why}.`, page: page.key };
     try {

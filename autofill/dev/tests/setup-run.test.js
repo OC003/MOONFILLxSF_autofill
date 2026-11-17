@@ -286,6 +286,51 @@ test('after Save, an error on the page is reported as failed', async () => {
   assert.match(result.message, /Something went wrong/);
 });
 
+// An ag-Grid like Awin's commission groups: headings with col-ids; cells only become editable after
+// "Edit Commission Groups", and then open an editor on double-click: a popup list for the two
+// dropdown columns, an inline box for Publisher Commission (Enter commits).
+function agGridPage({add = false, rows = 1} = {}) {
+  const cols = [['name', 'Name'], ['desc', 'Description'], ['code', 'Group code'], ['txn', 'Transaction Type'], ['type', 'Commission Type'], ['rate', 'Publisher Commission']];
+  const row = i => `<div class="ag-row" role="row" row-index="${i}">${cols.map(([id], c) => `<div class="ag-cell" role="gridcell" col-id="${id}" aria-colindex="${c + 1}">${id === 'name' ? 'Default' : ''}</div>`).join('')}</div>`;
+  return awin('/commission-manager/us/awin/merchant/123456/commission-groups', `
+    ${add ? '<button type="button" class="btn btn-add" id="add">Add Default Commission Group</button>' : '<button type="button" class="btn btn-add" id="edit">Edit Commission Groups</button>'}
+    <div class="ag-root-wrapper"><div class="ag-root">
+      <div class="ag-header-row" role="row">${cols.map(([id, t]) => `<div class="ag-header-cell" role="columnheader" col-id="${id}"><span class="ag-header-cell-text">${t}</span></div>`).join('')}</div>
+      <div class="ag-center-cols-container" id="body">${Array.from({length: add ? 0 : rows}, (_, i) => row(i)).join('')}</div>
+    </div></div><button type="button" onclick="window.saved = true">Save</button>`,
+  `window.editable = false; const options = {txn: ['Sale', 'Lead'], type: ['Fixed', 'Percentage']};
+   const editBtn = document.getElementById('edit'); if (editBtn) editBtn.addEventListener('click', () => { window.editable = true; });
+   const addBtn = document.getElementById('add'); if (addBtn) addBtn.addEventListener('click', () => { window.editable = true; document.getElementById('body').insertAdjacentHTML('beforeend', ${JSON.stringify(row(0))}); });
+   document.addEventListener('dblclick', e => {
+     const cell = e.target.closest('.ag-cell'); if (!cell || !window.editable) return;
+     const id = cell.getAttribute('col-id');
+     if (options[id]) {
+       cell.classList.add('ag-cell-popup-editing');
+       document.body.insertAdjacentHTML('beforeend', '<div class="ag-popup-editor">' + options[id].map(o => '<div class="ag-list-item">' + o + '</div>').join('') + '</div>');
+       document.querySelector('.ag-popup-editor').addEventListener('click', ev => { const item = ev.target.closest('.ag-list-item'); if (!item) return; cell.textContent = item.textContent; cell.classList.remove('ag-cell-popup-editing'); ev.currentTarget.remove(); });
+     } else if (id === 'rate') {
+       cell.classList.add('ag-cell-inline-editing'); cell.innerHTML = '<input type="text" class="ag-input-field-input">';
+       cell.querySelector('input').addEventListener('keydown', ev => { if (ev.key === 'Enter') { const v = ev.target.value; cell.classList.remove('ag-cell-inline-editing'); cell.textContent = v + '%'; } });
+     }
+   });`);
+}
+const agValues = w => ['txn', 'type', 'rate'].map(id => w.document.querySelector(`.ag-row .ag-cell[col-id="${id}"]`).textContent);
+
+test('commission groups (ag-Grid): Edit Commission Groups, then each cell is opened, filled and committed', async () => {
+  const w = agGridPage();
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.5%']);
+  assert.deepEqual([...w.document.querySelectorAll('.ag-cell')].slice(0, 3).map(c => c.textContent), ['Default', '', ''], 'the first three cells are left alone');
+});
+
+test('commission groups (ag-Grid): on a new programme, Add Default Commission Group adds the row that is filled', async () => {
+  const w = agGridPage({add: true});
+  const result = await fill(w);
+  assert.equal(result.status, 'filled', result.message);
+  assert.deepEqual(agValues(w), ['Sale', 'Percentage', '7.5%']);
+});
+
 // ---------- Background runner ----------
 
 function runner(answers) {
@@ -311,7 +356,7 @@ function runner(answers) {
   context.TCAUsageWorker = {add: e => context.usage.push(e)};
   vm.runInContext('const NI_URLS = mid => Array.from({length: 10}, (_, i) => `https://ui.awin.com/page${i}/${mid}`);', context);
   vm.runInContext(read('setup/background.js'), context);
-  Object.assign(context.TCASetupRunner.T, {settle: 1, reloadStart: 5, answer: 50, retryWait: 1, reloadDelay: 1});
+  Object.assign(context.TCASetupRunner.T, {settle: 1, reloadStart: 5, answer: 50, retryWait: 1, reloadDelay: 1, signinWaits: 4});
   const start = message => new Promise(resolve => listeners[0](message, {tab: {id: 7}}, resolve));
   return {context, sent, created, start};
 }
@@ -337,7 +382,7 @@ test('runner: opens the 10 pages, does them one at a time, retries pre-join, car
   assert.deepEqual(plain(context.reloaded), [104], 'Tracking tag settings (page 5) is reloaded before filling, and only it');
   assert.ok(created.every(t => t.active === false), 'tabs open in the background');
   const order = sent.filter(([, action]) => action === 'tcaSetupFill').map(([tab]) => tab);
-  assert.deepEqual(order, [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 109, 109], 'one page at a time; pre-join tried 3 times');
+  assert.deepEqual(order, [100, 102, 103, 104, 105, 107, 108, 109, 109, 109], 'one page at a time; pre-filled pages not touched; pre-join tried 3 times');
   const progress = sent.filter(([, action]) => action === 'tcaSetupProgress');
   assert.ok(progress.length >= 21 && progress.every(([tab]) => tab === 7), 'progress (working + result per page, then done) goes to the record tab');
   const marks = sent.filter(([, action]) => action === 'tcaSetupMark').map(([tab, , symbol]) => [tab, symbol]);
@@ -346,6 +391,27 @@ test('runner: opens the 10 pages, does them one at a time, retries pre-join, car
   assert.match(context.notified.message, /7 saved, 2 skipped, 1 need a look/);
   assert.match(context.notified.message, /Commission groups: "Transaction Type" not found/);
   assert.deepEqual(plain(context.usage), [{tool: 'New Implementation', action: 'setup', outcome: 'failed', reason: 'setup-page-failed', tc: 'Alex Mock-Person'}]);
+});
+
+test('runner: tabs open one at a time, and a page still on Awin\'s sign-in redirect is waited for', async () => {
+  const signin = {2: 2, 3: 99};   // page 3 comes back after 2 sign-in answers; page 4 never does (needs a login)
+  const openedBeforeFill = [];
+  let created;
+  const r = runner((index, m) => {
+    if (m.action === 'tcaSetupFill') {
+      openedBeforeFill.push([index, created.length]);
+      if (signin[index] > 0) { signin[index]--; return {status: 'signin', message: 'Awin\'s sign-in page is showing.', login: index === 3}; }
+      return {status: 'filled', message: 'Filled.'};
+    }
+    return {ok: true};
+  });
+  created = r.created;
+  await r.start({action: 'tcaSetupRun', mid: '1', values: {...VALUES, platformOffer: 'Advanced'}, save: false});
+  for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
+  assert.ok(openedBeforeFill.filter(([index]) => index === 0).every(([, n]) => n === 1), 'page 1 is filled before the other tabs are opened');
+  assert.equal(openedBeforeFill.filter(([index]) => index === 2).length, 3, 'asked again after each sign-in redirect');
+  assert.match(r.context.notified.message, /Plugin store: Awin asked to sign in again in this tab/);
+  assert.match(r.context.notified.message, /7 filled \(not saved\), 2 skipped, 1 need a look/);
 });
 
 test('runner: gives up on pre-join after 5 attempts and says so', async () => {
