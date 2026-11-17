@@ -14,7 +14,7 @@
   const SUCCESS = '.alert-success, .toast-success, .notification-success';
 
   // Timings (ms). quiet: how long the page must stop changing before it counts as loaded.
-  const T = { quiet: 2000, quietMax: 25000, recheck: 2500 };
+  const T = { quiet: 1200, quietMax: 15000, recheck: 1500 };
 
   // Waits until the page has stopped changing (its data has arrived and been drawn), or quietMax.
   function settled() {
@@ -243,11 +243,14 @@
     return partial.sort((a, b) => words(a).length - words(b).length)[0] || null;
   }
 
-  async function clickSave(el, name) {
+  async function clickSave(el, name, upToDate) {
     if (!el) fail(`The ${name} button wasn't found.`);
-    if (el.disabled || el.classList.contains('btn-disabled')) {
-      await waitFor(() => !el.disabled && !el.classList.contains('btn-disabled'), 5000);
-      if (el.disabled) fail(`The ${name} button stayed disabled: the page didn't register the changes.`);
+    const off = () => el.disabled || el.classList.contains('btn-disabled');
+    if (off()) {
+      await waitFor(() => !off(), 5000);
+      // Save stays greyed out when nothing changed: fine if the page already shows every value.
+      if (off() && upToDate && upToDate()) return { status: 'saved', message: 'Already up to date: nothing needed saving.' };
+      if (off()) fail(`The ${name} button stayed disabled: the page didn't register the changes.`);
     }
     // Answer first: a classic form reloads the page as soon as it's submitted.
     setTimeout(() => clickLikeUser(el), 100);
@@ -522,7 +525,7 @@
         if (wrong.length) fail(`${wrong.join(', ')} kept changing back after being filled.`);
         // A new address shows a warning under its box with "Add to Accepted Domains": click each one.
         const prompt = () => clickableText('Add to Accepted Domains');
-        await waitFor(prompt, 3000);
+        await waitFor(prompt, 2000);
         let added = 0;
         for (let p = prompt(); p && added < 6; p = prompt()) {
           clickLikeUser(p);
@@ -563,6 +566,8 @@
         await setText(rate, v.publisherCommission, 'Publisher commission');
       },
       save: () => button(['Save', 'Save changes', 'Update', 'Confirm']),
+      // The grid shows no confirmation after saving; no error shown counts as saved.
+      verify: () => [!errorShown()],
       diagnose: () => describeCommissionPage()
     },
     {
@@ -649,7 +654,7 @@
       async fill() {
         const boxes = PUBLISHERS.map(id => [id, publisherBox(id)]);
         const missing = boxes.filter(([, box]) => !box).map(([id]) => id);
-        if (missing.length === PUBLISHERS.length) return { status: 'unconfirmed', message: `Publishers ${PUBLISHERS.join(' and ')} have no tick box: they may already be pre-joined.` };
+        if (missing.length === PUBLISHERS.length) return { status: 'skipped', message: `Already pre-joined: publishers ${PUBLISHERS.join(' and ')} have no tick box.` };
         if (missing.length) fail(`Publisher ${missing.join(', ')} not found with a tick box.`);
         for (const [id, box] of boxes) ensureChecked(box, `Publisher ${id}`);
         return null;
@@ -690,7 +695,8 @@
       const note = early && early.note;
       if (early && early.status) return { ...early, page: page.key };
       if (!save) return { status: 'filled', message: `Filled, not saved: check it, then save it yourself.${note ? ' ' + note : ''}`, page: page.key, note };
-      return { ...(await clickSave(page.save(), 'Save')), page: page.key, note };
+      const upToDate = page.verify && (() => { try { return page.verify(values).every(Boolean); } catch { return false; } });
+      return { ...(await clickSave(page.save(), 'Save', upToDate)), page: page.key, note };
     } catch (error) {
       return { status: 'failed', message: error instanceof SetupError ? error.message : `Unexpected error: ${error.message}`, page: page.key, diagnostics: page.diagnose ? page.diagnose() : diagnostics() };
     }

@@ -112,6 +112,15 @@ test('commission groups: if the row can\'t be found, the result describes the pa
   assert.doesNotMatch(result.diagnostics, /Secret|98765/, 'no values');
 });
 
+test('a greyed-out Save is fine when the page already shows every value (nothing to save)', async () => {
+  const body = `<input id="MainWebsiteURL" value="${VALUES.websiteUrl}"><input id="GlobalClickThroughPage" value="${VALUES.landingPage}">
+    <input id="ClickAppend" value="source=aw&amp;utm_source=awin&amp;sv1=affiliate&amp;sv_campaign_id=!!!id!!!">
+    <input type="checkbox" id="DeeplinkEnabled" checked><input type="checkbox" id="NoDomainDeeplink" checked><button class="btn btn-disabled" disabled>Save</button>`;
+  const w = awin('/tracking-settings/us/awin/advertiser/123456/main-settings', body);
+  const result = await fill(w, VALUES, true);
+  assert.deepEqual([result.status, result.message], ['saved', 'Already up to date: nothing needed saving.']);
+});
+
 test('pages that come pre-filled are skipped, and the plugin is skipped for Access', async () => {
   assert.equal((await fill(awin('/awin/merchant/123456/settings/invite-user', '<input id="email">'))).status, 'skipped');
   assert.equal((await fill(awin('/provider/finance/fee-manager/en/123456', ''))).status, 'skipped');
@@ -272,7 +281,7 @@ test('background: sets an editor from the page side only for Awin pages, in the 
   const {context} = runner(() => ({ok: true}));
   const listeners = [];
   const calls = [];
-  const ctx = vm.createContext({console, setTimeout, clearTimeout, URL});
+  const ctx = vm.createContext({console, setTimeout, clearTimeout, setInterval, clearInterval, URL});
   ctx.chrome = {runtime: {onMessage: {addListener: l => listeners.push(l)}}, scripting: {executeScript: async o => { calls.push(o); return [{result: {editor: 'CodeMirror'}}]; }}};
   vm.runInContext(read('setup/background.js'), ctx);
   const ask = (message, sender) => new Promise(resolve => { for (const l of listeners) if (l(message, sender, resolve) === true) return; resolve('unanswered'); });
@@ -330,7 +339,8 @@ test('pre-join publishers: ticks exactly 45628 and 111 (not 1111) and submits th
 });
 
 test('pre-join publishers: none listed means probably already done; one missing is a failure', async () => {
-  assert.equal((await fill(prejoin(['999']))).status, 'unconfirmed');
+  const done = await fill(prejoin(['999']));
+  assert.deepEqual([done.status, done.message], ['skipped', 'Already pre-joined: publishers 45628 and 111 have no tick box.']);
   const one = await fill(prejoin(['45628']));
   assert.deepEqual([one.status, one.message], ['failed', 'Publisher 111 not found with a tick box.']);
 });
@@ -438,7 +448,7 @@ test('Awin\'s OIDC sign-in callbacks count as sign-in pages, so the run waits fo
 function runner(answers) {
   const sent = [];
   const created = [];
-  const context = vm.createContext({console, setTimeout, clearTimeout, URL});
+  const context = vm.createContext({console, setTimeout, clearTimeout, setInterval, clearInterval, URL});
   const listeners = [];
   context.chrome = {
     runtime: {onMessage: {addListener: l => listeners.push(l)}},
@@ -510,7 +520,7 @@ test('runner: tabs open one at a time, and a page still on Awin\'s sign-in redir
   created = r.created;
   await r.start({action: 'tcaSetupRun', mid: '1', values: {...VALUES, platformOffer: 'Advanced'}, save: false});
   for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
-  assert.ok(openedBeforeFill.filter(([index]) => index === 0).every(([, n]) => n === 1), 'page 1 is filled before the other tabs are opened');
+  assert.ok(openedBeforeFill.every(([index, n]) => n <= index + 2), 'never more than one page opened ahead of the one being filled');
   assert.equal(openedBeforeFill.filter(([index]) => index === 2).length, 3, 'asked again after each sign-in redirect');
   assert.match(r.context.notified.message, /Plugin store: Awin asked to sign in again in this tab/);
   assert.match(r.context.notified.message, /7 filled \(not saved\), 2 skipped, 1 need a look/);
@@ -535,6 +545,19 @@ test('runner: for Access, the Plugin store page is skipped without being touched
   for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
   assert.deepEqual(asked, [0, 2, 4, 5, 7, 8, 9]);
   assert.match(r.context.notified.message, /7 filled \(not saved\), 3 skipped/);
+});
+
+test('runner: keeps the background script awake during a run, and stops afterwards', async () => {
+  const r = runner((index, m) => (m.action === 'tcaSetupFill' ? new Promise(res => setTimeout(() => res({status: 'filled', message: 'Filled.'}), 30)) : {ok: true}));
+  let pings = 0;
+  r.context.chrome.runtime.getPlatformInfo = async () => { pings++; };
+  r.context.TCASetupRunner.T.keepAlive = 20;
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false});
+  for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10);
+  const during = pings;
+  await tick(100);
+  assert.ok(during >= 3, `pinged ${during} times`);
+  assert.equal(pings, during, 'no more pings after the run');
 });
 
 test('runner: gives up on pre-join after 5 attempts and says so', async () => {

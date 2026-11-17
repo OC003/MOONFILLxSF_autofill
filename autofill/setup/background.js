@@ -6,7 +6,7 @@
 (function () {
   const PAGES = ['Tracking settings', 'Invite user', 'Commission groups', 'Plugin store', 'Tracking tag settings',
     'Account details', 'Fee manager', 'Mobile tracking', 'Advertiser settings', 'Pre-join publishers'];
-  const T = { load: 30000, settle: 4000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000, signinWaits: 4, pageLimit: 120000 };
+  const T = { load: 30000, settle: 1000, keepAlive: 20000, reloadStart: 4000, answer: 15000, retries: 5, retryWait: 3000, reloadDelay: 5000, signinWaits: 4, pageLimit: 120000 };
   // Pages reloaded before filling (by position): Tracking tag settings often doesn't load fully first time.
   const RELOAD_FIRST = new Set([4]);
   // Pages that come pre-filled (Invite user, Fee manager): opened for reference, never filled.
@@ -114,11 +114,18 @@
     }
     // Tabs open one at a time, as each page's turn comes: opening all ten at once sends some of them
     // to Awin's sign-in pages.
+    // To save time, the next page is opened once the current one has loaded (its sign-in is done),
+    // so it loads while the current one is being filled. Never more than one page ahead.
     const tabs = [];
+    const opening = [];
+    const openedAt = [];
     let group = null;
+    const ensureOpen = i => (i < urls.length ? (opening[i] = opening[i] || open(i)) : Promise.resolve(null));
     const open = async i => {
+      if (i > 0) await opening[i - 1];   // keep the tabs in order
       const tab = await chrome.tabs.create({ url: urls[i], active: false });
       tabs[i] = tab;
+      openedAt[i] = Date.now();
       try {
         if (group === null) { group = await chrome.tabs.group({ tabIds: [tab.id] }); await chrome.tabGroups.update(group, { title: `${mid} setup`, color: 'cyan' }); }
         else await chrome.tabs.group({ groupId: group, tabIds: [tab.id] });
@@ -127,9 +134,12 @@
     };
 
     const results = [];
+    // Keeps the background script awake for the whole run, even with the browser in the background.
+    const awake = setInterval(() => { try { chrome.runtime.getPlatformInfo().catch(() => {}); } catch { /* not available */ } }, T.keepAlive);
+    try {
     for (let i = 0; i < urls.length; i++) {
       progress({ index: i, name: PAGES[i], status: 'working' });
-      await open(i);
+      await ensureOpen(i);
       let result;
       const skip = ALWAYS_SKIPPED.has(i) ? 'comes pre-filled' : i === PLUGIN_PAGE && values.platformOffer === 'Access' ? 'not needed for Access' : null;
       if (skip) {
@@ -137,13 +147,15 @@
         results.push({ name: PAGES[i], ...result });
         chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL.skipped }).catch(() => {});
         progress({ index: i, name: PAGES[i], status: result.status, message: result.message });
+        ensureOpen(i + 1);
         continue;
       }
       try {
         await waitForLoad(tabs[i].id);
+        ensureOpen(i + 1);
         if (RELOAD_FIRST.has(i)) {
           progress({ index: i, name: PAGES[i], status: 'working', message: 'reloading the page first' });
-          await sleep(T.reloadDelay);
+          await sleep(Math.max(0, T.reloadDelay - (Date.now() - openedAt[i])));   // 5 s after it opened
           await reload(tabs[i].id);
         }
         await sleep(T.settle);
@@ -158,6 +170,9 @@
       results.push({ name: PAGES[i], ...result });
       chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL[result.status] || '⚠' }).catch(() => {});
       progress({ index: i, name: PAGES[i], status: result.status, message: result.message, note: result.note, diagnostics: result.diagnostics });
+    }
+    } finally {
+      clearInterval(awake);
     }
 
     const needsLook = results.filter(r => r.status === 'failed' || r.status === 'unconfirmed');
