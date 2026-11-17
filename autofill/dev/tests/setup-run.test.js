@@ -664,6 +664,62 @@ test('form: the progress bar fills as pages finish; the red ✕ cancels; the end
   assert.equal(ui.querySelector('.close').textContent, 'Close');
 });
 
+test('form: Hide leaves a small box above the panel; clicking it brings back the full box as it was', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  chrome.listener({action: 'tcaSetupProgress', index: 0, status: 'saved'});
+  chrome.listener({action: 'tcaSetupProgress', index: 1, status: 'skipped', message: 'Skipped: comes pre-filled.'});
+  chrome.listener({action: 'tcaSetupProgress', index: 2, status: 'working'});
+  const mini = ui.querySelector('.mini');
+  assert.equal(mini.hidden, true, 'not shown while the full box is open');
+
+  ui.querySelector('.close').click();                       // Hide
+  assert.equal(ui.querySelector('.backdrop').hidden, true);
+  assert.equal(mini.hidden, false, 'the small box stays on screen');
+  assert.match(mini.querySelector('.label').textContent, /Setup: Commission groups…/);
+  assert.equal(mini.querySelector('.mini-count').textContent, '2 / 10');
+  chrome.listener({action: 'tcaSetupProgress', index: 2, status: 'saved'});
+  assert.equal(mini.querySelector('.mini-count').textContent, '3 / 10', 'it keeps updating');
+
+  mini.click();                                             // back to the full box, as it was
+  assert.equal(mini.hidden, true);
+  assert.equal(ui.querySelector('.backdrop').hidden, false);
+  assert.equal(ui.querySelector('.progress').hidden, false);
+  assert.equal(ui.querySelector('.ask').hidden, true);
+  assert.equal(ui.querySelector('.count').textContent, '3 / 10');
+  assert.deepEqual([...ui.querySelectorAll('li')].slice(0, 3).map(li => li.dataset.status), ['saved', 'skipped', 'saved']);
+
+  ui.querySelector('.close').click();
+  chrome.listener({action: 'tcaSetupProgress', done: true, summary: '8 saved, 2 skipped', needsLook: 0});
+  assert.equal(mini.hidden, false, 'the result stays until dismissed');
+  assert.match(mini.querySelector('.label').textContent, /Setup finished: 8 saved, 2 skipped/);
+  assert.equal(mini.querySelector('.mini-stop').hidden, true);
+  mini.querySelector('.dismiss').click();
+  assert.equal(mini.hidden, true);
+  assert.equal(ui.querySelector('.backdrop').hidden, true, 'dismissing doesn\'t reopen the box');
+  window.close();
+});
+
+test('form: the small box\'s ✕ cancels the run', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  ui.querySelector('.close').click();
+  ui.querySelector('.mini-stop').click();
+  await tick();
+  assert.equal(chrome.messages.at(-1).action, 'tcaSetupCancel');
+  assert.match(ui.querySelector('.mini .label').textContent, /Cancelling after this page/);
+  assert.equal(ui.querySelector('.backdrop').hidden, true, 'cancelling from the small box doesn\'t reopen the full one');
+  window.close();
+});
+
 test('form: a MID of 0, or a record without a Landing Page URL, can\'t be run', async () => {
   const chrome = fakeChrome();
   const window = await record(chrome);

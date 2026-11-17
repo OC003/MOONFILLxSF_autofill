@@ -101,6 +101,14 @@
   li .msg { color: #5c5c5c; font-size: 12px; }
   li[data-status="failed"], li[data-status="unconfirmed"] { color: #ba0517; }
   li[data-status="saved"] { color: #2e844a; }
+  .mini { position: fixed; right: 16px; bottom: 64px; z-index: 2147483000; width: 340px; max-width: calc(100vw - 32px); box-sizing: border-box;
+    background: #fff; color: #181818; border: 1px solid #c9c9c9; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.18);
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 8px 10px; display: grid; gap: 6px; cursor: pointer; }
+  .mini .top { display: flex; align-items: center; gap: 8px; }
+  .mini .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .mini .bar { height: 6px; }
+  .mini button.stop { width: 22px; height: 22px; line-height: 22px; font-size: 13px; }
+  .mini button.dismiss { border: 0; background: none; color: #5c5c5c; padding: 0 4px; font-size: 16px; line-height: 1; }
   [hidden] { display: none !important; }
 </style>
 <div class="backdrop" hidden>
@@ -131,6 +139,15 @@
       <div class="row"><button type="button" class="copy">Copy results</button><button type="button" class="close">Hide</button></div>
     </div>
   </div>
+</div>
+<div class="mini" hidden role="status" aria-live="polite" title="Show the setup's progress">
+  <div class="top">
+    <span class="label">🚀 Setup</span>
+    <span class="count mini-count">0 / 10</span>
+    <button type="button" class="stop mini-stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
+    <button type="button" class="dismiss" title="Dismiss" aria-label="Dismiss" hidden>×</button>
+  </div>
+  <div class="bar"><div class="fill mini-fill"></div></div>
 </div>`;
   const $ = sel => shadow.querySelector(sel);
   let mid = '';
@@ -172,6 +189,13 @@
     const answer = await ask({ action: 'tcaSetupRun', mid, values: record.values, save });
     if (!answer.ok) { $('.error').textContent = `The setup couldn't start: ${answer.error}`; for (const b of ['.run', '.fill-only']) $(b).disabled = false; return; }
     finished = 0;
+    running = true;
+    hideMini();
+    $('.mini').classList.remove('done', 'attention');
+    $('.mini-stop').hidden = false;
+    $('.mini-stop').disabled = false;
+    $('.dismiss').hidden = true;
+    setMiniLabel('Setup: starting…');
     $('.ask').hidden = true;
     $('.progress').hidden = false;
     $('.progress').classList.remove('done', 'attention');
@@ -185,13 +209,41 @@
 
   function setBar(n) {
     $('.fill').style.width = `${(n / PAGES.length) * 100}%`;
+    $('.mini-fill').style.width = `${(n / PAGES.length) * 100}%`;
     $('.bar').setAttribute('aria-valuenow', String(n));
     $('.count').textContent = `${n} / ${PAGES.length}`;
+    $('.mini-count').textContent = `${n} / ${PAGES.length}`;
   }
+
+  // ---------- the small box shown after Hide, just above the Checklist Autofill panel ----------
+  let running = false;
+  let placing = null;
+  const mini = () => $('.mini');
+  function placeMini() {
+    const panel = document.getElementById('tca-root') && document.getElementById('tca-root').shadowRoot && document.getElementById('tca-root').shadowRoot.querySelector('.panel');
+    const top = panel ? panel.getBoundingClientRect().top : 0;
+    mini().style.bottom = `${top > 0 ? Math.max(16, window.innerHeight - top + 8) : 64}px`;
+  }
+  function showMini() {
+    mini().hidden = false;
+    placeMini();
+    clearInterval(placing);
+    placing = setInterval(placeMini, 500);   // follows the panel as it opens and closes
+  }
+  function hideMini() {
+    mini().hidden = true;
+    clearInterval(placing);
+  }
+  function setMiniLabel(text) { $('.mini .label').textContent = `🚀 ${text}`; $('.mini').title = text; }
 
   function progress(update) {
     if (update.done) {
+      running = false;
       $('.current').textContent = update.error || `${update.cancelled ? 'Cancelled' : 'Finished'}: ${update.summary}.`;
+      setMiniLabel(update.error ? 'Setup couldn\'t run' : `Setup ${update.cancelled ? 'cancelled' : update.needsLook ? 'finished: needs a look' : 'finished'}: ${update.summary}`);
+      $('.mini').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
+      $('.mini-stop').hidden = true;
+      $('.dismiss').hidden = false;
       $('.stop').hidden = true;
       $('.close').textContent = 'Close';
       $('.progress').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
@@ -206,6 +258,7 @@
     li.querySelector('.msg').textContent = update.status === 'working' ? `${update.message || 'working'}…` : update.status === 'saved' ? (note ? `— ${note}` : '') : `— ${update.message || ''}${update.diagnostics ? ` (${update.diagnostics})` : ''}`;
     if (update.status === 'working') {
       $('.current').textContent = `${PAGES[update.index]}${update.message ? `: ${update.message}` : ''}…`;
+      setMiniLabel(`Setup: ${PAGES[update.index]}…`);
     } else {
       finished = Math.max(finished, update.index + 1);
       setBar(finished);
@@ -220,16 +273,23 @@
   });
 
   const close = () => { $('.backdrop').hidden = true; };
+  // Hide during a run (or Close with results still worth seeing) leaves the small box on screen.
+  const hide = () => { close(); if (running) showMini(); };
+  mini().addEventListener('click', () => { hideMini(); $('.backdrop').hidden = false; });
+  $('.dismiss').addEventListener('click', event => { event.stopPropagation(); hideMini(); });
+  $('.mini-stop').addEventListener('click', event => { event.stopPropagation(); cancelRun(); });
   $('.run').addEventListener('click', () => start(true));
   $('.fill-only').addEventListener('click', () => start(false));
   $('.cancel').addEventListener('click', close);
-  $('.close').addEventListener('click', close);   // during a run: hides the dialog, the run carries on
-  $('.stop').addEventListener('click', () => {
-    $('.stop').disabled = true;
+  $('.close').addEventListener('click', hide);   // during a run: hides the dialog, the run carries on
+  function cancelRun() {
+    for (const b of ['.stop', '.mini-stop']) $(b).disabled = true;
     $('.current').textContent = 'Cancelling: the page being filled is finished first…';
+    setMiniLabel('Cancelling after this page…');
     ask({ action: 'tcaSetupCancel' });
-  });
-  $('.backdrop').addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  }
+  $('.stop').addEventListener('click', cancelRun);
+  $('.backdrop').addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
   $('.tabs-only').addEventListener('click', () => { if (mid && !notCreatedYet(mid)) ask({ action: 'createNITabs', mid }); close(); });
 
   // Moonfill's 🚀 button: caught before its own click handler runs.
