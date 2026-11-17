@@ -50,7 +50,7 @@ globalThis.TCA_CONFIG = {
     minutesSaved: {
       'Checklist/fill-save': 10, 'Checklist/fill': 8,
       'Moonpull scan/scan': 10,
-      'New Implementation/setup': 20, 'New Implementation/open-tabs': 1,
+      'New Implementation/setup': 4.5, 'New Implementation/open-tabs': 1,   // a setup by hand takes about 4½ min
       'IR/open-tabs': 1
     }
   },
