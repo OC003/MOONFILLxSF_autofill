@@ -237,6 +237,29 @@
     return true;
   });
 
+  // Is the TC signed in to Awin? Asks for one of the classic setup pages (the server redirects a
+  // signed-out browser to Awin's sign-in) and looks at where it ended up. Nothing is changed.
+  //   { action: 'tcaSetupCheckSession', mid }  →  { signedIn: true | false | null, detail }
+  async function checkSession(mid) {
+    try {
+      const res = await fetch(`https://ui.awin.com/provider/migrated-advertiser-settings/${mid}`, { credentials: 'include', redirect: 'follow', cache: 'no-store' });
+      const where = new URL(res.url || 'https://ui.awin.com/');
+      if (/login|signin|\/idp\/|authori[sz]e|\/oidc|\/sso/i.test(where.pathname) || where.hostname !== 'ui.awin.com') return { signedIn: false, detail: 'Awin asked to sign in' };
+      if (res.status === 401 || res.status === 403) return { signedIn: false, detail: `Awin answered ${res.status}` };
+      if (res.ok) return { signedIn: true };
+      return { signedIn: null, detail: `Awin answered ${res.status}` };
+    } catch (error) {
+      return { signedIn: null, detail: String(error.message || error) };
+    }
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'tcaSetupCheckSession') return undefined;
+    const mid = String(message.mid || '').replace(/\D/g, '');
+    if (!mid) { sendResponse({ signedIn: null, detail: 'no MID' }); return undefined; }
+    checkSession(mid).then(sendResponse);
+    return true;
+  });
+
   // The ✕ on the progress bar: the page being filled is finished, then the run stops.
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.action !== 'tcaSetupCancel') return undefined;
@@ -256,5 +279,5 @@
     return undefined;
   });
 
-  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST, setEditorInPage };   // for tests
+  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST, setEditorInPage, checkSession };   // for tests
 })();

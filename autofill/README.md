@@ -91,6 +91,8 @@ The signs were checked against live public shops for Shopify, WooCommerce, BigCo
 - Reasons are fixed codes (`REASONS` in `usage.js`). Error text is never kept, because Moonfill's messages can contain MIDs.
 - Names keep only letters, spaces, `'`, `.` and `-`; anything else becomes "Unassigned".
 
+**Time saved.** The dashboard estimates time saved from `config.usage.minutesSaved`: minutes per successful use, by tool and action (for example `'Checklist/fill-save': 10`). These are estimates to adjust to the team's experience.
+
 **Who.** The record's **Assigned TC** (`config.assignedTcLabel`), read by `engine.assignedTc`.
 - For the checklist, the panel reads it at the end of each run.
 - For Moonfill's buttons, the worker asks the checklist content script in the sender's tab (`tcaAssignedTc`).

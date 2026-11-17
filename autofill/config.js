@@ -43,7 +43,17 @@ globalThis.TCA_CONFIG = {
   // the client. They are sent to this SharePoint list once 'site' is set, e.g.
   // 'https://zanox.sharepoint.com/teams/<team>'. While it is empty they wait in the browser.
   assignedTcLabel: 'Assigned TC',
-  usage: { site: '', list: 'Plugin usage' },
+  usage: {
+    site: '', list: 'Plugin usage',
+    // Estimated minutes each successful use saves compared with doing it by hand (for the dashboard's
+    // "time saved"). Estimates only: adjust them to the team's experience.
+    minutesSaved: {
+      'Checklist/fill-save': 10, 'Checklist/fill': 8,
+      'Moonpull scan/scan': 10,
+      'New Implementation/setup': 20, 'New Implementation/open-tabs': 1,
+      'IR/open-tabs': 1
+    }
+  },
 
   // Programme setup: the record field that decides the query string append and the plugin.
   platformOfferLabel: 'Platform Offer',

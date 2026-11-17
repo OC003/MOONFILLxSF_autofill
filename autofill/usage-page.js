@@ -120,20 +120,21 @@
     body.replaceChildren();
     const { key, dir } = sort;
     rows.sort((a, b) => (typeof a[key] === 'number' ? (a[key] - b[key]) * dir : String(a[key]).localeCompare(String(b[key])) * dir) || b.total - a.total);
-    if (!rows.length) { const tr = el('tr'); const td = el('td', 'empty', 'No uses in this period.'); td.colSpan = 5; tr.append(td); body.append(tr); return; }
+    if (!rows.length) { const tr = el('tr'); const td = el('td', 'empty', 'No uses in this period.'); td.colSpan = 6; tr.append(td); body.append(tr); return; }
     for (const r of rows) {
       const tr = el('tr');
-      tr.append(el('td', null, r.person), el('td', null, r.tool), el('td', 'num', fmt(r.success)), el('td', 'num', fmt(r.failed)), el('td', 'num', fmt(r.total)));
+      tr.append(el('td', null, r.person), el('td', null, r.tool), el('td', 'num', fmt(r.success)), el('td', 'num', fmt(r.failed)), el('td', 'num', fmt(r.total)), el('td', 'num', U.duration(r.minutes)));
       body.append(tr);
     }
   }
 
   function draw() {
-    const s = U.summarise(filtered());
+    const s = U.summarise(filtered(), ((globalThis.TCA_CONFIG || {}).usage || {}).minutesSaved);
     $('k-total').textContent = fmt(s.total);
     $('k-rate').textContent = s.total ? `${Math.round((s.success / s.total) * 100)}%` : '–';
     $('k-failed').textContent = fmt(s.failed);
     $('k-people').textContent = fmt(s.people.length);
+    $('k-saved').textContent = U.duration(s.minutes);
     bars($('people'), s.people);
     bars($('tools'), s.tools);
     weeks($('weeks'), s.weeks);
@@ -155,6 +156,7 @@
     $('footer').textContent = local
       ? 'Usage reporting isn\'t connected to SharePoint yet, so this shows only the uses recorded in this browser. They are sent once the SharePoint list is set up.'
       : `${fmt(all.length)} records. Updated ${new Date().toLocaleString('en-GB')}.`;
+    $('footer').textContent += ' Time saved is an estimate: minutes saved per successful use, set in config.js.';
     draw();
   }
 

@@ -64,12 +64,12 @@ test('dashboard figures: per person, per tool, per reason, per week and the pers
     r('2026-11-10T09:00:00Z', 'Sam Lee', 'Checklist', 'success')
   ]);
   assert.deepEqual([s.total, s.success, s.failed], [4, 3, 1]);
-  assert.deepEqual(plain(s.people), [{key: 'Jane Smith', success: 2, failed: 1, total: 3}, {key: 'Sam Lee', success: 1, failed: 0, total: 1}]);
+  assert.deepEqual(plain(s.people), [{key: 'Jane Smith', success: 2, failed: 1, total: 3, minutes: 0}, {key: 'Sam Lee', success: 1, failed: 0, total: 1, minutes: 0}]);
   assert.deepEqual(plain(s.tools.map(t => [t.key, t.total])), [['Checklist', 3], ['Moonpull scan', 1]]);
   assert.deepEqual(plain(s.reasons.map(t => [t.key, t.failed])), [['option-missing', 1]]);
   assert.deepEqual(plain(s.weeks.map(w => [w.key, w.total])), [['2026-11-09', 1], ['2026-11-16', 3]]);
   assert.equal(U.weekOf('2026-11-22T23:00:00Z'), '2026-11-16', 'Sunday belongs to the week starting Monday');
-  assert.deepEqual(plain(s.table.find(t => t.person === 'Jane Smith' && t.tool === 'Checklist')), {person: 'Jane Smith', tool: 'Checklist', success: 1, failed: 1, total: 2});
+  assert.deepEqual(plain(s.table.find(t => t.person === 'Jane Smith' && t.tool === 'Checklist')), {person: 'Jane Smith', tool: 'Checklist', success: 1, failed: 1, total: 2, minutes: 0});
 });
 
 // ---------- Background worker: Moonfill's worker plus autofill/background.js ----------
@@ -209,6 +209,17 @@ test('background: if Moonfill renames its functions, the hooks are skipped and c
 
 // ---------- Dashboard page ----------
 
+test('time saved: estimated minutes for successful uses only, by tool and action', () => {
+  const U = usage();
+  const r = (Tool, Action, Outcome, AssignedTC = 'Jane Smith') => ({When: '2026-11-17T09:00:00Z', AssignedTC, Tool, Action, Outcome, Reason: '', Version: '1'});
+  const minutes = {'Checklist/fill-save': 10, 'New Implementation/setup': 20};
+  const s = U.summarise([r('Checklist', 'fill-save', 'success'), r('Checklist', 'fill-save', 'failed'), r('New Implementation', 'setup', 'success', 'Sam Lee'), r('IR', 'open-tabs', 'success')], minutes);
+  assert.equal(s.minutes, 30);
+  assert.deepEqual(plain(s.people.map(p => [p.key, p.minutes])), [['Jane Smith', 10], ['Sam Lee', 20]]);
+  assert.equal(s.table.find(t => t.tool === 'Checklist').minutes, 10);
+  assert.deepEqual([U.duration(0), U.duration(45), U.duration(60), U.duration(150), U.duration(6000)], ['0 min', '45 min', '1 h', '2 h 30 min', '100 h']);
+});
+
 test('dashboard: totals, bars per person and tool, failure reasons and the table; filters redraw', async () => {
   const {JSDOM} = await import('jsdom');
   const {fileURLToPath} = await import('node:url');
@@ -225,6 +236,8 @@ test('dashboard: totals, bars per person and tool, failure reasons and the table
   const text = id => doc.getElementById(id).textContent;
   assert.equal(text('source'), 'This browser only');
   assert.deepEqual([text('k-total'), text('k-rate'), text('k-failed'), text('k-people')], ['3', '67%', '1', '2'], 'last 3 months by default');
+  assert.equal(text('k-saved'), '8 min', 'one successful checklist fill (8 min) in the period');
+  assert.match(text('footer'), /Time saved is an estimate/);
   assert.deepEqual([...doc.querySelectorAll('#people .name')].map(n => n.textContent), ['Jane Smith', 'Sam Lee']);
   assert.equal(doc.querySelectorAll('#people .seg.failed').length, 1);
   assert.match(text('reasons'), /Dropdown option not available/);

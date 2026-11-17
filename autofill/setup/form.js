@@ -26,15 +26,18 @@
   }
   const number = text => { const m = String(text).replace(',', '.').match(/-?\d+(\.\d+)?/); return m ? m[0] : ''; };
 
-  // Everything the setup needs, from the record: { values, blocked: [reasons] }.
+  // Everything the setup needs, from the record: { values, missing: [what's missing], core: bool }.
+  // core: the Landing Page URL or Platform Offer is missing, so it can only run with the details
+  // entered by hand. Other gaps only affect their own page.
   function readRecord() {
     const R = cfg.setupRecord;
-    const blocked = [];
+    const missing = [];
     const site = engine.landingPageUrl(document, cfg).url || '';
-    if (!site) blocked.push('The record has no Landing Page URL.');
+    if (!site) missing.push('Landing Page URL');
     const offerText = field(cfg.platformOfferLabel);
     const platformOffer = OFFERS.find(o => offerText.toLowerCase().startsWith(o.toLowerCase())) || '';
-    if (!platformOffer) blocked.push(offerText ? `Platform Offer "${offerText}" isn't Access, Accelerate or Advanced.` : 'The record has no Platform Offer.');
+    if (!platformOffer) missing.push(offerText ? `Platform Offer (it says "${offerText}", not Access, Accelerate or Advanced)` : 'Platform Offer');
+    const core = missing.length > 0;
 
     // Commission group: only "Percentage" programmes are set up automatically (Sale + Percentage).
     const type = field(R.commissionType);
@@ -44,13 +47,18 @@
         : { commissionProblem: `"${R.commissionAmount}" is empty on the record, so the commission group wasn't set.` })
       : { commissionSkip: type ? `Commission type is "${type}": set the commission group by hand` : `"${R.commissionType}" is empty on the record: set the commission group by hand` };
 
+    if (!type) missing.push(R.commissionType);
+    else if (commission.commissionProblem) missing.push(R.commissionAmount);
+    const validationDays = (field(R.validationPeriod).match(/\d+/) || [''])[0];
+    if (!validationDays) missing.push(R.validationPeriod);
+
     const values = {
       websiteUrl: site, landingPage: site, platformOffer, ...commission,
-      approval: 'Manual Approval',
-      validationDays: (field(R.validationPeriod).match(/\d+/) || [''])[0],
+      approval: 'Manual Approval', validationDays,
       assignedTc: engine.assignedTc(document, cfg)
     };
-    return { values, blocked };
+    const note = commission.commissionSkip && type ? `Commission type is "${type}", so the commission group will be left for you (or enter it by hand).` : '';
+    return { values, missing, core, note };
   }
 
   const ask = message => Promise.resolve().then(() => chrome.runtime.sendMessage(message)).then(a => a || { error: 'no answer' }, e => ({ error: e.message }));
@@ -73,6 +81,7 @@
   const host = document.createElement('div');
   host.id = 'tca-setup-form';
   const shadow = host.attachShadow({ mode: 'open' });
+  const select = (name, label, options) => `<label>${label}<select name="${name}" required><option value="">Choose…</option>${options.map(o => `<option>${o}</option>`).join('')}</select></label>`;
   shadow.innerHTML = `
 <style>
   :host { all: initial; }
@@ -109,6 +118,16 @@
   .mini .bar { height: 6px; }
   .mini button.stop { width: 22px; height: 22px; line-height: 22px; font-size: 13px; }
   .mini button.dismiss { border: 0; background: none; color: #5c5c5c; padding: 0 4px; font-size: 16px; line-height: 1; }
+  .warn { background: #fef1e8; border: 1px solid #f4c7a5; border-radius: 6px; padding: 8px 10px; display: grid; gap: 6px; justify-items: start; }
+  .warn-text { white-space: pre-line; }
+  .session .note { font-size: 12px; }
+  .session.bad .session-text { color: #ba0517; font-weight: 600; }
+  form.manual { display: grid; gap: 10px; }
+  form.manual[hidden] { display: none; }
+  fieldset { border: 1px solid #e5e5e5; border-radius: 6px; padding: 8px 12px 12px; display: grid; gap: 8px; margin: 0; }
+  legend { font-weight: 600; padding: 0 4px; }
+  form.manual label { display: grid; gap: 3px; font-weight: 600; }
+  form.manual input, form.manual select { font: inherit; font-weight: 400; padding: 5px 7px; border: 1px solid #c9c9c9; border-radius: 4px; }
   [hidden] { display: none !important; }
 </style>
 <div class="backdrop" hidden>
@@ -117,6 +136,8 @@
     <div class="ask">
       <div class="muted mid"></div>
       <p>Everything is taken from the record. Save each page as it's filled?</p>
+      <div class="session"><span class="session-text note"></span> <span class="session-actions" hidden><button type="button" class="link signin">Open Awin</button><button type="button" class="link recheck">Check again</button></span></div>
+      <div class="warn" hidden><div class="warn-text"></div><button type="button" class="manual-open">Enter the details by hand</button></div>
       <div class="note shopify"></div>
       <div class="error" role="alert"></div>
       <div class="row">
@@ -126,6 +147,29 @@
         <button type="button" class="primary run">Run and save</button>
       </div>
     </div>
+    <form class="manual" hidden novalidate>
+      <p class="muted">Enter the details for this programme. Anything found on the record is already filled in.</p>
+      <fieldset><legend>Site</legend>
+        <label>Website URL<input name="websiteUrl" type="url" required></label>
+        <label>Landing Page<input name="landingPage" type="url" required></label>
+        ${select('platformOffer', 'Platform Offer', OFFERS)}
+      </fieldset>
+      <fieldset><legend>Commission group</legend>
+        ${select('transactionType', 'Transaction Type', ['Sale', 'Lead'])}
+        ${select('commissionType', 'Commission Type', ['Fixed', 'Percentage'])}
+        <label>Publisher commission<input name="publisherCommission" type="text" required></label>
+      </fieldset>
+      <fieldset><legend>Advertiser settings</legend>
+        ${select('approval', 'Approval of Publishers Joining', ['Manual Approval', 'Auto Approval'])}
+        <label>Validation Period Days<input name="validationDays" type="number" min="1" step="1" required></label>
+      </fieldset>
+      <div class="error manual-error" role="alert"></div>
+      <div class="row">
+        <button type="button" class="link back">Back</button>
+        <button type="button" class="manual-fill">Fill only</button>
+        <button type="button" class="primary manual-run">Run and save</button>
+      </div>
+    </form>
     <div class="progress" hidden>
       <div class="bar-row">
         <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div>
@@ -151,28 +195,65 @@
 </div>`;
   const $ = sel => shadow.querySelector(sel);
   let mid = '';
-  let record = { values: null, blocked: [] };
+  let record = { values: null, missing: [], core: false, note: '' };
+  let blocked = [];          // MID problems: nothing can run
+  let session = null;        // true signed in, false signed out, null unknown, 'checking'
+  const manualForm = () => $('form.manual');
+  const manualField = name => manualForm().elements[name];
   let shopping = null;   // the Shopify check, once started
   let finished = 0;
   const notCreatedYet = m => /^0+$/.test(m);
 
+  // Run buttons: never with a MID problem or while signed out of Awin; the automatic run also needs
+  // the record's Landing Page URL and Platform Offer.
+  function updateButtons() {
+    const stop = blocked.length > 0 || session === false || session === 'checking';
+    for (const b of ['.run', '.fill-only']) $(b).disabled = stop || record.core;
+    for (const b of ['.manual-run', '.manual-fill']) $(b).disabled = stop;
+    $('.manual-open').disabled = blocked.length > 0;
+  }
+
+  async function checkSession() {
+    session = 'checking';
+    $('.session').classList.remove('bad');
+    $('.session-text').textContent = 'Checking you\'re signed in to Awin…';
+    $('.session-actions').hidden = true;
+    updateButtons();
+    const answer = await ask({ action: 'tcaSetupCheckSession', mid });
+    session = answer.signedIn === undefined ? null : answer.signedIn;
+    if (session === false) {
+      $('.session').classList.add('bad');
+      $('.session-text').textContent = 'You\'re not signed in to Awin. Sign in, then click Check again.';
+      $('.session-actions').hidden = false;
+    } else {
+      $('.session-text').textContent = session ? 'Signed in to Awin ✓' : `Couldn't check the Awin sign-in (${answer.detail || answer.error || 'no answer'}): the run will say if it's needed.`;
+    }
+    updateButtons();
+  }
+
   async function open() {
     mid = readMid();
     record = readRecord();
-    if (!mid) record.blocked.unshift('No MID found on this record.');
-    else if (notCreatedYet(mid)) record.blocked.unshift('This advertiser hasn\'t been created in Awin yet (the MID is 0). Create it first, then run the setup.');
+    blocked = !mid ? ['No MID found on this record.'] : notCreatedYet(mid) ? ['This advertiser hasn\'t been created in Awin yet (the MID is 0). Create it first, then run the setup.'] : [];
     $('.ask').hidden = false;
+    manualForm().hidden = true;
     $('.progress').hidden = true;
     $('.mid').textContent = [mid ? `MID ${mid}` : '', record.values.platformOffer].filter(Boolean).join(' · ');
-    $('.error').textContent = record.blocked.join('\n');
+    $('.error').textContent = blocked.join('\n');
     $('.shopify').textContent = '';
-    const blocked = record.blocked.length > 0;
-    for (const b of ['.run', '.fill-only']) $(b).disabled = blocked;
+    // What the marketing checklist is missing, with the way round it.
+    const gaps = record.missing.length && !blocked.length;
+    $('.warn').hidden = !gaps && !record.note;
+    $('.warn-text').textContent = gaps
+      ? `The record is missing details the setup needs:\n• ${record.missing.join('\n• ')}${record.core ? '\nThe setup can run with them entered by hand.' : '\nThe pages that need them will be flagged, or enter them by hand.'}`
+      : record.note;
     $('.tabs-only').disabled = !mid || notCreatedYet(mid);
+    $('.session').hidden = blocked.length > 0;
+    updateButtons();
     $('.backdrop').hidden = false;
-    $(blocked ? '.cancel' : '.run').focus();
+    $(blocked.length || record.core ? '.cancel' : '.run').focus();
     shopping = null;
-    if (!blocked) {
+    if (!blocked.length && !record.core) {
       const site = record.values.websiteUrl;
       $('.shopify').textContent = 'Checking whether the site is a Shopify store…';
       shopping = shopifyAddress(site).then(shop => {
@@ -180,14 +261,16 @@
         $('.shopify').textContent = shop.note || '';
       });
     }
+    if (!blocked.length) await checkSession();
   }
 
-  async function start(save) {
-    if (record.blocked.length) return;
-    for (const b of ['.run', '.fill-only']) $(b).disabled = true;
-    if (shopping) await shopping;   // the Website URL may change for Shopify stores
-    const answer = await ask({ action: 'tcaSetupRun', mid, values: record.values, save });
-    if (!answer.ok) { $('.error').textContent = `The setup couldn't start: ${answer.error}`; for (const b of ['.run', '.fill-only']) $(b).disabled = false; return; }
+  async function start(save, values = record.values) {
+    if (blocked.length || session === false) return;
+    for (const b of ['.run', '.fill-only', '.manual-run', '.manual-fill']) $(b).disabled = true;
+    if (shopping && values === record.values) await shopping;   // the Website URL may change for Shopify stores
+    const answer = await ask({ action: 'tcaSetupRun', mid, values, save });
+    if (!answer.ok) { $(manualForm().hidden ? '.error' : '.manual-error').textContent = `The setup couldn't start: ${answer.error}`; updateButtons(); return; }
+    manualForm().hidden = true;
     finished = 0;
     running = true;
     hideMini();
@@ -272,6 +355,45 @@
     setTimeout(() => { $('.copy').textContent = 'Copy results'; }, 2000);
   });
 
+  // ---------- the details entered by hand (when the record is missing some) ----------
+  function openManual() {
+    const v = record.values;
+    manualForm().reset();
+    for (const name of ['websiteUrl', 'landingPage', 'platformOffer', 'transactionType', 'commissionType', 'publisherCommission', 'approval', 'validationDays']) {
+      if (v[name]) manualField(name).value = v[name];
+    }
+    if (!v.approval) manualField('approval').value = 'Manual Approval';
+    $('.manual-error').textContent = '';
+    $('.ask').hidden = true;
+    manualForm().hidden = false;
+    updateButtons();
+    const first = [...manualForm().elements].find(el => (el.tagName === 'INPUT' || el.tagName === 'SELECT') && !el.value);
+    (first || $('.manual-run')).focus();
+  }
+
+  function manualValues() {
+    const names = ['websiteUrl', 'landingPage', 'platformOffer', 'transactionType', 'commissionType', 'publisherCommission', 'approval', 'validationDays'];
+    const v = Object.fromEntries(names.map(name => [name, String(manualField(name).value).trim()]));
+    const empty = names.filter(name => !v[name]).map(name => manualField(name).closest('label').firstChild.textContent.trim());
+    if (empty.length) throw new Error(`Please fill in: ${empty.join(', ')}.`);
+    for (const name of ['websiteUrl', 'landingPage']) if (!/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v[name])) throw new Error(`${name === 'websiteUrl' ? 'Website URL' : 'Landing Page'} must be a full web address starting with https://.`);
+    if (!/^\d+$/.test(v.validationDays) || +v.validationDays < 1) throw new Error('Validation Period Days must be a whole number of days.');
+    v.publisherCommission = number(v.publisherCommission) || v.publisherCommission;
+    return { ...v, assignedTc: record.values.assignedTc };
+  }
+
+  function startManual(save) {
+    let v;
+    try { v = manualValues(); } catch (error) { $('.manual-error').textContent = error.message; return; }
+    start(save, v);
+  }
+  $('.manual-open').addEventListener('click', openManual);
+  $('.back').addEventListener('click', () => { manualForm().hidden = true; $('.ask').hidden = false; });
+  $('.manual-run').addEventListener('click', () => startManual(true));
+  $('.manual-fill').addEventListener('click', () => startManual(false));
+  $('.signin').addEventListener('click', () => window.open('https://ui.awin.com/', '_blank'));
+  $('.recheck').addEventListener('click', checkSession);
+
   const close = () => { $('.backdrop').hidden = true; };
   // Hide during a run (or Close with results still worth seeing) leaves the small box on screen.
   const hide = () => { close(); if (running) showMini(); };
@@ -309,5 +431,5 @@
   } catch { /* no extension messaging (tests) */ }
 
   (document.body || document.documentElement).appendChild(host);
-  globalThis.TCASetupForm = { open, start, progress, readRecord };
+  globalThis.TCASetupForm = { open, start, progress, readRecord, openManual };
 })();

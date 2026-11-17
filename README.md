@@ -97,6 +97,8 @@ Clicking **🚀 New Implementation** on a record sets up the programme in Awin. 
 | Approval of Publishers Joining | always **Manual Approval** |
 | Validation Period Days | **Auto validation period**. For Access, a value already on the page is kept; if it's empty or -1, it becomes the period + 7 |
 
+Before anything starts, the box checks you're signed in to Awin. If you're not, it says so, with **Open Awin** and **Check again**. It also checks the record has everything listed above. If something is missing, it lists it, with **Enter the details by hand**, which opens a form filled in with whatever the record has. Without a Landing Page URL or Platform Offer, that form is the only way to run it.
+
 You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**. A progress bar then shows the pages being done one at a time. The red **✕** cancels: the page being filled is finished, and the rest aren't started.
 
 | Page | What the setup does |

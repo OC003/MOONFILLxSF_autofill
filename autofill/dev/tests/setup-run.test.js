@@ -582,10 +582,10 @@ async function record(chrome, scenario = 'success') {
   for (const f of ['fields.js', 'config.js', 'settings.js', 'templates.js', 'engine.js', 'setup/form.js']) window.eval(read(f));
   return window;
 }
-function fakeChrome(site = () => ({error: 'permission'})) {
+function fakeChrome(site = () => ({error: 'permission'}), session = () => ({signedIn: true})) {
   const chrome = {
     messages: [], local: {},
-    runtime: {sendMessage: async m => { chrome.messages.push(m); return m.action === 'tcaReadSite' ? site(m) : {ok: true}; }, onMessage: {addListener: l => { chrome.listener = l; }}},
+    runtime: {sendMessage: async m => { chrome.messages.push(m); return m.action === 'tcaReadSite' ? site(m) : m.action === 'tcaSetupCheckSession' ? session(m) : {ok: true}; }, onMessage: {addListener: l => { chrome.listener = l; }}},
     storage: {local: {get: async k => ({[k]: chrome.local[k]}), set: async o => Object.assign(chrome.local, o)}}
   };
   return chrome;
@@ -600,11 +600,13 @@ test('form: 🚀 reads everything from the record and only asks about saving (Mo
   assert.equal(window.moonfillNIClicks, undefined, "Moonfill's own click handler didn't run");
   const ui = formRoot(window);
   assert.equal(ui.querySelector('.backdrop').hidden, false);
-  assert.equal(ui.querySelector('form'), null, 'no form to fill in');
+  assert.equal(ui.querySelector('form.manual').hidden, true, 'no form to fill in');
+  assert.equal(ui.querySelector('.warn').hidden, true, 'nothing missing from the record');
   assert.equal(ui.querySelector('.mid').textContent, 'MID 123456 · Access');
-  assert.deepEqual([...ui.querySelectorAll('.ask button')].map(b => b.textContent), ['Just open the tabs', 'Cancel', 'Fill only', 'Run and save']);
+  assert.deepEqual([...ui.querySelectorAll('.ask .row button')].map(b => b.textContent), ['Just open the tabs', 'Cancel', 'Fill only', 'Run and save']);
+  assert.equal(ui.querySelector('.session-text').textContent, 'Signed in to Awin ✓');
   assert.equal(ui.querySelector('.run').disabled, false);
-  assert.deepEqual(plain(window.TCASetupForm.readRecord()), {blocked: [], values: {
+  assert.deepEqual(plain(window.TCASetupForm.readRecord()), {missing: [], core: false, note: '', values: {
     websiteUrl: 'https://shop.example.com/', landingPage: 'https://shop.example.com/', platformOffer: 'Access',
     transactionType: 'Sale', commissionType: 'Percentage', publisherCommission: '5',
     approval: 'Manual Approval', validationDays: '30', assignedTc: 'Alex Mock-Person'}});
@@ -720,6 +722,95 @@ test('form: the small box\'s ✕ cancels the run', async () => {
   window.close();
 });
 
+test('form: signed out of Awin, the run can\'t start; Check again unlocks it once signed in', async () => {
+  let signedIn = false;
+  const chrome = fakeChrome(undefined, () => ({signedIn}));
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  assert.match(ui.querySelector('.session-text').textContent, /not signed in to Awin/);
+  assert.equal(ui.querySelector('.session-actions').hidden, false);
+  assert.equal(ui.querySelector('.run').disabled, true);
+  assert.equal(ui.querySelector('.fill-only').disabled, true);
+  signedIn = true;
+  ui.querySelector('.recheck').click();
+  await tick(30);
+  assert.equal(ui.querySelector('.session-text').textContent, 'Signed in to Awin ✓');
+  assert.equal(ui.querySelector('.run').disabled, false);
+  assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupCheckSession').length, 2);
+});
+
+test('form: if the sign-in can\'t be checked, the run is still allowed and says so', async () => {
+  const window = await record(fakeChrome(undefined, () => ({signedIn: null, detail: 'Failed to fetch'})));
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  assert.match(ui.querySelector('.session-text').textContent, /Couldn't check the Awin sign-in \(Failed to fetch\)/);
+  assert.equal(ui.querySelector('.run').disabled, false);
+});
+
+test('form: a missing marketing checklist value is warned about, with the details-by-hand form as a way round', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome, 'no-amount');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  assert.equal(ui.querySelector('.warn').hidden, false);
+  assert.match(ui.querySelector('.warn-text').textContent, /missing details the setup needs:\n• Commission Amount\nThe pages that need them will be flagged, or enter them by hand\./);
+  assert.equal(ui.querySelector('.run').disabled, false, 'other pages can still run');
+
+  ui.querySelector('.manual-open').click();
+  const f = ui.querySelector('form.manual').elements;
+  assert.equal(ui.querySelector('form.manual').hidden, false);
+  assert.deepEqual([f.websiteUrl.value, f.landingPage.value, f.platformOffer.value, f.approval.value, f.validationDays.value], ['https://shop.example.com/', 'https://shop.example.com/', 'Access', 'Manual Approval', '30'], 'what the record had is filled in');
+  ui.querySelector('.manual-run').click();
+  await tick();
+  assert.match(ui.querySelector('.manual-error').textContent, /Please fill in: Transaction Type, Commission Type, Publisher commission/);
+  f.transactionType.value = 'Lead'; f.commissionType.value = 'Fixed'; f.publisherCommission.value = '£2.50';
+  ui.querySelector('.manual-run').click();
+  await tick(30);
+  const run = chrome.messages.find(m => m.action === 'tcaSetupRun');
+  assert.equal(run.save, true);
+  assert.deepEqual([run.values.transactionType, run.values.commissionType, run.values.publisherCommission, run.values.commissionProblem], ['Lead', 'Fixed', '2.50', undefined]);
+  assert.equal(ui.querySelector('.progress').hidden, false);
+});
+
+test('form: without a Landing Page URL or Platform Offer, only the details-by-hand form can run it', async () => {
+  const window = await record(fakeChrome(), 'no-landing');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  assert.match(ui.querySelector('.warn-text').textContent, /• Landing Page URL\n• Platform Offer[\s\S]*can run with them entered by hand/);
+  assert.equal(ui.querySelector('.run').disabled, true);
+  assert.equal(ui.querySelector('.manual-open').disabled, false);
+  ui.querySelector('.manual-open').click();
+  assert.equal(ui.querySelector('.manual-run').disabled, false);
+  ui.querySelector('.back').click();
+  assert.equal(ui.querySelector('.ask').hidden, false);
+});
+
+test('form: a non-Percentage commission type is mentioned, with the by-hand form offered', async () => {
+  const window = await record(fakeChrome(), 'fixed');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  assert.equal(ui.querySelector('.warn').hidden, false);
+  assert.match(ui.querySelector('.warn-text').textContent, /Commission type is "Fixed", so the commission group will be left for you \(or enter it by hand\)\./);
+  assert.equal(ui.querySelector('.run').disabled, false);
+});
+
+test('background: the Awin sign-in check reads where a classic page ends up', async () => {
+  const run = async answer => {
+    const ctx = vm.createContext({console, setTimeout, clearTimeout, setInterval, clearInterval, URL});
+    ctx.chrome = {runtime: {onMessage: {addListener: () => {}}}};
+    ctx.fetch = async (url, o) => { ctx.asked = [url, o.credentials]; if (answer instanceof Error) throw answer; return answer; };
+    vm.runInContext(read('setup/background.js'), ctx);
+    return {result: plain(await ctx.TCASetupRunner.checkSession('123456')), asked: plain(ctx.asked)};
+  };
+  const ok = await run({ok: true, status: 200, url: 'https://ui.awin.com/provider/migrated-advertiser-settings/123456'});
+  assert.deepEqual(ok.result, {signedIn: true});
+  assert.deepEqual(ok.asked, ['https://ui.awin.com/provider/migrated-advertiser-settings/123456', 'include']);
+  assert.equal((await run({ok: true, status: 200, url: 'https://ui.awin.com/idp/en/awin/login/prelogin'})).result.signedIn, false);
+  assert.equal((await run({ok: true, status: 200, url: 'https://id.awin.com/authorize?x'})).result.signedIn, false);
+  assert.deepEqual((await run(new Error('Failed to fetch'))).result, {signedIn: null, detail: 'Failed to fetch'});
+});
+
 test('form: a MID of 0, or a record without a Landing Page URL, can\'t be run', async () => {
   const chrome = fakeChrome();
   const window = await record(chrome);
@@ -736,7 +827,8 @@ test('form: a MID of 0, or a record without a Landing Page URL, can\'t be run', 
 
   const noLanding = await record(fakeChrome(), 'no-landing');
   await noLanding.TCASetupForm.open();
-  assert.match(formRoot(noLanding).querySelector('.error').textContent, /no Landing Page URL[\s\S]*no Platform Offer/);
+  assert.match(formRoot(noLanding).querySelector('.warn-text').textContent, /Landing Page URL[\s\S]*Platform Offer/);
+  assert.equal(formRoot(noLanding).querySelector('.run').disabled, true);
 
   const {start, created} = runner(() => ({ok: true}));
   assert.deepEqual(plain(await start({action: 'tcaSetupRun', mid: '0', values: VALUES})), {ok: false, error: "the MID is 0: the advertiser hasn't been created in Awin yet."});

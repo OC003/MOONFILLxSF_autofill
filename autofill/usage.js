@@ -86,16 +86,20 @@
     return d.toISOString().slice(0, 10);
   }
 
-  function summarise(rows) {
+  // Estimated minutes a use saved: successful uses only, by tool and action (config.usage.minutesSaved).
+  const minutesFor = (r, minutes) => (r.Outcome === 'failed' ? 0 : (minutes || {})[`${r.Tool}/${r.Action}`] || 0);
+
+  function summarise(rows, minutes) {
     const total = rows.length;
     const failed = rows.filter(r => r.Outcome === 'failed').length;
     const tally = (key, of) => {
       const map = new Map();
       for (const r of rows) {
         const k = of(r);
-        const t = map.get(k) || { key: k, success: 0, failed: 0, total: 0 };
+        const t = map.get(k) || { key: k, success: 0, failed: 0, total: 0, minutes: 0 };
         t[r.Outcome === 'failed' ? 'failed' : 'success']++;
         t.total++;
+        t.minutes += minutesFor(r, minutes);
         map.set(k, t);
       }
       return [...map.values()];
@@ -103,12 +107,13 @@
     const byTotal = (a, b) => b.total - a.total || String(a.key).localeCompare(String(b.key));
     return {
       total, failed, success: total - failed,
+      minutes: rows.reduce((sum, r) => sum + minutesFor(r, minutes), 0),
       people: tally('person', r => r.AssignedTC || 'Unassigned').sort(byTotal),
       tools: tally('tool', r => r.Tool).sort(byTotal),
       reasons: tally('reason', r => r.Reason || 'other').filter(t => t.failed).sort((a, b) => b.failed - a.failed),
       weeks: tally('week', r => weekOf(r.When)).sort((a, b) => a.key.localeCompare(b.key)),
       table: tally('pair', r => `${r.AssignedTC}\u0000${r.Tool}`)
-        .map(t => ({ person: t.key.split('\u0000')[0], tool: t.key.split('\u0000')[1], success: t.success, failed: t.failed, total: t.total }))
+        .map(t => ({ person: t.key.split('\u0000')[0], tool: t.key.split('\u0000')[1], success: t.success, failed: t.failed, total: t.total, minutes: t.minutes }))
     };
   }
 
@@ -275,5 +280,12 @@
     return api;
   }
 
-  root.TCAUsage = { TOOLS, ACTIONS, OUTCOMES, ROW, REASON_LABELS, reasonCode, person, row, weekOf, summarise, startBackground };
+  // "12 h 30 min", "45 min", "0 min".
+  function duration(minutes) {
+    const m = Math.round(minutes);
+    const h = Math.floor(m / 60);
+    return h ? `${h.toLocaleString('en-GB')} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`;
+  }
+
+  root.TCAUsage = { duration, TOOLS, ACTIONS, OUTCOMES, ROW, REASON_LABELS, reasonCode, person, row, weekOf, summarise, startBackground };
 })(globalThis);
