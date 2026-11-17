@@ -126,7 +126,7 @@ test('dates are read in the formats Salesforce shows, day/month order from dateF
 
 test('manifest: Moonfill entries unchanged; autofill added as its own content script and settings page', () => {
   const manifest = JSON.parse(read('../../manifest.json'));
-  assert.equal(manifest.name, 'Moonfill');
+  assert.equal(manifest.name, 'UI_AutoSetup_Prototype', 'the prototype has its own name, so it isn\'t confused with the team release');
   assert.deepEqual(manifest.content_scripts.slice(0, 2), [
     {matches: ['https://forms.office.com/*', 'https://forms.cloud.microsoft/*'], js: ['content.js']},
     {matches: ['https://awin.lightning.force.com/*'], js: ['salesforce.js']}
