@@ -279,5 +279,17 @@
     return undefined;
   });
 
+  // The setup's summary for the record's Chatter: handed to Moonfill's own Chatter code, which answers
+  // moonfillPost in the record tab (salesforce.js). Only ever to the tab that asked.
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'tcaSetupChatter') return undefined;
+    const tabId = sender && sender.tab ? sender.tab.id : null;
+    if (tabId == null || !message.text) { sendResponse({ ok: false, error: 'no record tab or text' }); return undefined; }
+    Promise.resolve()
+      .then(() => chrome.tabs.sendMessage(tabId, { action: 'moonfillPost', text: String(message.text), recordId: message.recordId, share: true, fast: false, activated: false }))
+      .then(answer => sendResponse(answer || { ok: false, error: 'no answer from the page' }), error => sendResponse({ ok: false, error: String(error.message || error) }));
+    return true;
+  });
+
   globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST, setEditorInPage, checkSession };   // for tests
 })();

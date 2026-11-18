@@ -31,8 +31,11 @@
   class SetupError extends Error {}
   const fail = message => { throw new SetupError(message); };
 
+  // Page 1's Default Query String Append. Access: source=aw on a supported e-commerce platform (or when
+  // the site couldn't be checked), utm_source=awin when the site check found none. Others: the long one.
   const PLATFORM_APPEND = {
     Access: 'source=aw',
+    accessNoPlatform: 'utm_source=awin',
     other: 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!'
   };
   const PLUGIN = { name: 'R.O.EYE - Consent - SingleView', code: 'AWIN.Tracking.RoEye = AWIN.Tracking.RoEye || {};' };
@@ -262,7 +265,9 @@
 
   // ---------- the pages, in the order New Implementation opens them ----------
 
-  const append = v => (v.platformOffer === 'Access' ? PLATFORM_APPEND.Access : PLATFORM_APPEND.other);
+  // v.ecommerce (from the site check on the record): true = a supported platform, false = none found,
+  // undefined = not checked.
+  const append = v => (v.platformOffer !== 'Access' ? PLATFORM_APPEND.other : v.ecommerce === false ? PLATFORM_APPEND.accessNoPlatform : PLATFORM_APPEND.Access);
 
   // ---------- Commission groups: a table of boxes ----------
 

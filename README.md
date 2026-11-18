@@ -103,7 +103,7 @@ You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**
 
 | Page | What the setup does |
 |---|---|
-| Tracking settings | Website URL, Landing Page, query string append (by Platform Offer), Link Builder and relative URLs ticked, Add to Accepted Domains |
+| Tracking settings | Website URL, Landing Page, query string append, Link Builder and relative URLs ticked, Add to Accepted Domains. Query string: Accelerate/Advanced `source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!`. Access: `source=aw` if the client's site runs on one of the 13 supported e-commerce platforms, `utm_source=awin` if none is found, `source=aw` if the site can't be checked (detection not allowed in Settings, or the site doesn't load) |
 | Invite user, Fee manager | skipped (they come pre-filled) |
 | Commission groups | Add Default Commission Group, then Transaction Type, Commission Type, Publisher Commission |
 | Plugin store | Not for Access. Otherwise adds **R.O.EYE - Consent - SingleView** with its code line. The page shows no confirmation after saving, so no error counts as saved |
@@ -114,6 +114,10 @@ You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**
 | Pre-join publishers | Publishers 45628 and 111, retried up to 5 times if the page shows an error |
 
 Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. **Details** under the progress bar lists each page's result, and **Copy results** copies it. A MID of 0 (advertiser not created in Awin yet) can't be run. **Just open the tabs** opens the pages without filling anything, as before.
+
+**Summary in Chatter.** After **Run and save**, if at least one page was saved, a summary is posted to the record's **Chatter**: each page's result (saved, skipped and why, needs a look and why, not started), the commission group used and the SingleView Setup result. If the record tab isn't in front when the run ends, it's posted as soon as you come back to it. **Fill only** posts nothing. Posting opens the record's Chatter tab.
+
+While the setup runs, the **Awin logo** at the front of the progress bar shows and clears itself in a circular sweep. It stays whole when the run ends.
 
 ### Fields filled by both
 

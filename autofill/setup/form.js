@@ -63,21 +63,52 @@
 
   const ask = message => Promise.resolve().then(() => chrome.runtime.sendMessage(message)).then(a => a || { error: 'no answer' }, e => ({ error: e.message }));
 
-  // The store's own myshopify address, if the site is a Shopify shop: { url } or { note }.
-  async function shopifyAddress(site) {
+  // The site check, once per 🚀, on the record's Landing Page URL: { url?, ecommerce?, note }.
+  // - url: a Shopify store's own myshopify address, used as the Website URL.
+  // - ecommerce (Access only): true if the site runs on one of the supported e-commerce platforms (the
+  //   checklist's platform templates; signs of two count too), false if none was found. Page 1's query
+  //   string depends on it. Left out when the site couldn't be read: page 1 then keeps source=aw.
+  async function checkSite(site, offer) {
+    const access = offer === 'Access';
     const page = await ask({ action: 'tcaReadSite', url: site, via: 'fetch' });
-    if (page.error === 'permission') return { note: 'Tip: allow platform detection in Settings so Shopify stores get their myshopify address.' };
-    let shop = page.ok && (page.text.match(SHOPIFY_SHOP) || [])[1];
-    const looksShopify = page.ok && T.detect(page.text, cfg).name === 'Shopify';
-    if (!shop && (!page.ok || looksShopify)) {
-      const tab = await ask({ action: 'tcaReadSite', url: site, via: 'tab' });
-      shop = tab.ok && (tab.text.match(SHOPIFY_SHOP) || [])[1];
+    if (page.error === 'permission') {
+      return { note: access ? 'Platform detection isn\'t allowed (Settings), so the e-commerce platform wasn\'t checked: the query string is source=aw as usual.'
+        : 'Tip: allow platform detection in Settings so Shopify stores get their myshopify address.' };
     }
-    if (shop) return { url: `https://${shop.toLowerCase()}`, note: 'Shopify store: its myshopify address is used as the Website URL.' };
-    return { note: looksShopify ? 'Looks like Shopify, but the myshopify address wasn\'t found: the Landing Page URL is used.' : '' };
+    let found = page.ok ? T.detect(page.text, cfg) : null;
+    let shop = page.ok && (page.text.match(SHOPIFY_SHOP) || [])[1];
+    // The invisible read misses what a page's own scripts add: look again in a background tab if it
+    // failed, if it looks like Shopify without the address, or (Access) if no platform showed.
+    if (!page.ok || (!shop && found.name === 'Shopify') || (access && !found.name)) {
+      const tab = await ask({ action: 'tcaReadSite', url: site, via: 'tab' });
+      if (tab.ok) {
+        if (!found || !found.name) found = T.detect(tab.text, cfg);
+        shop = shop || (tab.text.match(SHOPIFY_SHOP) || [])[1];
+      }
+    }
+    const out = {};
+    const notes = [];
+    if (shop) { out.url = `https://${shop.toLowerCase()}`; notes.push('Shopify store: its myshopify address is used as the Website URL.'); }
+    else if (found && found.name === 'Shopify') notes.push('Looks like Shopify, but the myshopify address wasn\'t found: the Landing Page URL is used.');
+    if (access) {
+      const two = found && /signs of both/.test(found.reason || '');
+      if (!found) notes.push('The site couldn\'t be read to check its e-commerce platform, so the query string is source=aw as usual.');
+      else if (found.name || two) { out.ecommerce = true; notes.push(`E-commerce platform: ${found.name || 'found'}, so the query string is source=aw.`); }
+      else { out.ecommerce = false; notes.push('No supported e-commerce platform found on the site, so the query string is utm_source=awin.'); }
+    }
+    return { ...out, note: notes.join(' ') };
   }
 
   // ---------- the dialog ----------
+  // The Awin logo with its circular sweep: a mask circle whose dash grows clockwise from 12 o'clock
+  // (the logo appears), holds, then moves on (the logo clears), and so on. The browser animates it
+  // (SVG <animate>), so no script runs for it. data-state="still" drops the mask: the logo stays whole.
+  const C = 71.13;   // the mask circle's length: 2π × 11.32 (its stroke covers the whole 32 × 32 square)
+  const logoSvg = (id, cls) => `<svg class="logo${cls}" viewBox="0 0 32 32" aria-hidden="true" data-state="still"><defs><mask id="${id}">` +
+    `<circle cx="16" cy="16" r="11.32" fill="none" stroke="#fff" stroke-width="22.64" stroke-dasharray="${C} ${C}" transform="rotate(-90 16 16)">` +
+    `<animate attributeName="stroke-dashoffset" values="${C};0;0;-${C};-${C}" keyTimes="0;0.375;0.5;0.875;1" dur="2.4s" repeatCount="indefinite"/></circle>` +
+    `</mask></defs><image width="32" height="32" mask="url(#${id})"/></svg>`;
+
   const host = document.createElement('div');
   host.id = 'tca-setup-form';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -98,12 +129,18 @@
   button:disabled { opacity: .5; cursor: default; }
   button.link { border: 0; padding: 6px 4px; text-decoration: underline; margin-right: auto; }
   .bar-row { display: flex; align-items: flex-end; gap: 10px; }
-  /* The pixel runner rides along the front of the progress bar. */
-  .track { position: relative; flex: 1; padding-top: 46px; }
+  /* The Awin logo rides along the front of the progress bar, with a circular sweep while the setup runs. */
+  .track { position: relative; flex: 1; padding-top: 38px; }
   .track .bar { width: 100%; }
-  .runner { position: absolute; bottom: 8px; left: 0; width: 36px; height: 44px; image-rendering: pixelated; transform: translateX(-50%); transition: left .4s ease-out; pointer-events: none; }
+  .logo { position: absolute; bottom: 14px; left: 0; width: 32px; height: 32px; transform: translateX(-50%); transition: left .4s ease-out; pointer-events: none; overflow: visible; }
+  .logo[data-state="still"] image { mask: none; }
   .mini .track { padding-top: 24px; }
-  .mini .runner { width: 18px; height: 22px; bottom: 5px; }
+  .mini .logo { width: 18px; height: 18px; bottom: 9px; }
+  /* The hidden guy: now and then he peeks up from behind the small box's bar, then ducks back down. */
+  .peek { position: absolute; bottom: 6px; width: 18px; height: 13px; overflow: hidden; transform: translateX(-50%); pointer-events: none; }
+  .peek img { display: block; width: 18px; height: 13px; image-rendering: pixelated; transform: translateY(100%); }
+  .peek.up img { animation: peek 2.6s ease-in-out forwards; }
+  @keyframes peek { 0% { transform: translateY(100%); } 18%, 82% { transform: translateY(0); } 100% { transform: translateY(100%); } }
   .bar { flex: 1; height: 10px; background: #e5e5e5; border-radius: 5px; overflow: hidden; }
   .fill { height: 100%; width: 0; background: #0176d3; border-radius: 5px; transition: width .3s; }
   .done .fill { background: #2e844a; }
@@ -178,12 +215,13 @@
     </form>
     <div class="progress" hidden>
       <div class="bar-row">
-        <div class="track"><img class="runner" alt="" hidden><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div></div>
+        <div class="track">${logoSvg('tca-logo-sweep', '')}<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div></div>
         <span class="count">0 / 10</span>
         <button type="button" class="stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
       </div>
       <div class="current" role="status" aria-live="polite">Starting…</div>
       <div class="note sv"></div>
+      <div class="note chatter"></div>
       <details><summary>Details</summary>
         <ol>${PAGES.map((p, i) => `<li data-index="${i}"><span class="icon">·</span> ${p} <span class="msg"></span></li>`).join('')}</ol>
       </details>
@@ -198,7 +236,7 @@
     <button type="button" class="stop mini-stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
     <button type="button" class="dismiss" title="Dismiss" aria-label="Dismiss" hidden>×</button>
   </div>
-  <div class="track"><img class="runner mini-runner" alt="" hidden><div class="bar"><div class="fill mini-fill"></div></div></div>
+  <div class="track"><span class="peek" aria-hidden="true" hidden><img alt=""></span>${logoSvg('tca-logo-sweep-mini', ' mini-logo')}<div class="bar"><div class="fill mini-fill"></div></div></div>
 </div>`;
   const $ = sel => shadow.querySelector(sel);
   let mid = '';
@@ -207,7 +245,8 @@
   let session = null;        // true signed in, false signed out, null unknown, 'checking'
   const manualForm = () => $('form.manual');
   const manualField = name => manualForm().elements[name];
-  let shopping = null;   // the Shopify check, once started
+  let shopping = null;   // the site check, once started
+  let siteNote = '';
   let finished = 0;
   const notCreatedYet = m => /^0+$/.test(m);
 
@@ -260,12 +299,15 @@
     $('.backdrop').hidden = false;
     $(blocked.length || record.core ? '.cancel' : '.run').focus();
     shopping = null;
+    siteNote = '';
     if (!blocked.length && !record.core) {
       const site = record.values.websiteUrl;
-      $('.shopify').textContent = 'Checking whether the site is a Shopify store…';
-      shopping = shopifyAddress(site).then(shop => {
-        if (shop.url) record.values.websiteUrl = shop.url;
-        $('.shopify').textContent = shop.note || '';
+      $('.shopify').textContent = 'Checking the client\'s site…';
+      shopping = checkSite(site, record.values.platformOffer).then(found => {
+        if (found.url) record.values.websiteUrl = found.url;
+        if ('ecommerce' in found) record.values.ecommerce = found.ecommerce;
+        siteNote = found.note || '';
+        $('.shopify').textContent = siteNote;
       });
     }
     if (!blocked.length) await checkSession();
@@ -274,12 +316,18 @@
   async function start(save, values = record.values) {
     if (blocked.length || session === false) return;
     for (const b of ['.run', '.fill-only', '.manual-run', '.manual-fill']) $(b).disabled = true;
-    if (shopping && values === record.values) await shopping;   // the Website URL may change for Shopify stores
+    if (shopping) await shopping;   // the Website URL may change for Shopify stores, and Access's query string
+    // Details entered by hand for the same site keep the site check's platform result.
+    if (values !== record.values && values.landingPage === record.values.landingPage && 'ecommerce' in record.values) values = { ...values, ecommerce: record.values.ecommerce };
     const answer = await ask({ action: 'tcaSetupRun', mid, values, save });
     if (!answer.ok) { $(manualForm().hidden ? '.error' : '.manual-error').textContent = `The setup couldn't start: ${answer.error}`; updateButtons(); return; }
     manualForm().hidden = true;
     finished = 0;
     running = true;
+    results.length = 0;
+    lastRun = { save, values, mid, siteNote, recordId: (location.pathname.match(/\/TSE__c\/([a-zA-Z0-9]+)/) || [])[1] || '' };
+    $('.chatter').textContent = '';
+    planPeek();
     hideMini();
     $('.mini').classList.remove('done', 'attention');
     $('.mini-stop').hidden = false;
@@ -295,6 +343,7 @@
     $('.current').textContent = 'Starting…';
     for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
     setBar(0);
+    startSweep();
     setSingleView(values.platformOffer, save);   // on this record tab, while the setup works in its own tabs
   }
 
@@ -319,24 +368,53 @@
         : `⚠ ${sv.section} wasn't set: ${result.message}`;
   }
 
-  // The runner: running while the setup works. At the end, by how many of the 10 pages worked (saved,
-  // filled or skipped as intended): 8 or more cheers, 3 to 7 thumbs up, fewer than 3 is sad. Cancelled,
-  // or couldn't run: it stands still. It sits at the front of the bar (never off its ends).
-  const ending = worked => (worked >= 8 ? 'cheer' : worked >= 3 ? 'thumbs' : 'sad');
-  const sprite = name => { try { return chrome.runtime.getURL(`assets/runner${name}.gif`); } catch { return ''; } };
-  function runner(state, n) {
-    for (const img of shadow.querySelectorAll('.runner')) {
-      const src = sprite(state === 'run' ? '' : `-${state}`);
-      if (src && img.getAttribute('src') !== src) img.src = src;
-      img.hidden = !src;
-      img.dataset.state = state;
-      const half = img.classList.contains('mini-runner') ? 9 : 18;
-      if (n !== undefined) img.style.left = `clamp(${half}px, ${(n / PAGES.length) * 100}%, calc(100% - ${half}px))`;
+  // ---------- the Awin logo at the front of the bar ----------
+  // It sweeps while the setup runs (see logoSvg) and stays whole at the end. It sits at the front of
+  // the bar (never off its ends).
+  const asset = name => { try { return chrome.runtime.getURL(`assets/${name}`); } catch { return ''; } };
+  for (const image of shadow.querySelectorAll('.logo image')) image.setAttribute('href', asset('awin-logo.png'));
+  function setSweep(on) {
+    for (const svg of shadow.querySelectorAll('.logo')) {
+      svg.dataset.state = on ? 'sweep' : 'still';
+      try {
+        if (on) { svg.setCurrentTime(0); svg.unpauseAnimations(); } else svg.pauseAnimations();
+      } catch { /* no SVG animation API (tests) */ }
+    }
+  }
+  const startSweep = () => setSweep(true);
+  const stopSweep = () => setSweep(false);
+  function placeLogo(n) {
+    for (const el of shadow.querySelectorAll('.logo')) {
+      const half = el.classList.contains('mini-logo') ? 9 : 16;
+      el.style.left = `clamp(${half}px, ${(n / PAGES.length) * 100}%, calc(100% - ${half}px))`;
     }
   }
 
+  // ---------- the hidden guy ----------
+  // About one run in 20, he peeks up from behind the small box's bar once, somewhere along it, after a
+  // random page (3rd to 8th). Only while the box is hidden away (the small box is showing), never in
+  // the full box. Missed moments wait for the next page.
+  const PEEK_CHANCE = 1 / 20;
+  let peekAfter = 0;   // the page count after which he peeks this run; 0 = not this run
+  function planPeek() { peekAfter = Math.random() < PEEK_CHANCE ? 3 + Math.floor(Math.random() * 6) : 0; }
+  function maybePeek() {
+    if (!peekAfter || !running || finished < peekAfter || mini().hidden) return;
+    peekAfter = 0;
+    const el = $('.peek');
+    const img = el.querySelector('img');
+    if (!img.getAttribute('src')) img.src = asset('runner-peek.gif');
+    const front = (finished / PAGES.length) * 100;   // the logo's spot: keep clear of it
+    const spot = front > 35 ? 8 + Math.random() * (front - 25) : front + 12 + Math.random() * Math.max(0, 80 - front);
+    el.style.left = `${Math.min(92, spot).toFixed(1)}%`;
+    el.classList.remove('up');
+    el.hidden = false;
+    void el.offsetWidth;   // restart the animation
+    el.classList.add('up');
+    setTimeout(() => { el.hidden = true; el.classList.remove('up'); }, 2700);
+  }
+
   function setBar(n) {
-    runner(running ? 'run' : shadow.querySelector('.runner').dataset.state || 'run', n);
+    placeLogo(n);
     $('.fill').style.width = `${(n / PAGES.length) * 100}%`;
     $('.mini-fill').style.width = `${(n / PAGES.length) * 100}%`;
     $('.bar').setAttribute('aria-valuenow', String(n));
@@ -358,6 +436,7 @@
     placeMini();
     clearInterval(placing);
     placing = setInterval(placeMini, 500);   // follows the panel as it opens and closes
+    setTimeout(maybePeek, 1500);
   }
   function hideMini() {
     mini().hidden = true;
@@ -377,7 +456,9 @@
       $('.close').textContent = 'Close';
       $('.progress').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
       if (!update.cancelled) setBar(PAGES.length);
-      runner(update.cancelled || update.error ? 'stand' : ending(PAGES.length - (update.needsLook || 0)));
+      stopSweep();
+      // A summary for the record's Chatter, when something was saved (Run and save only).
+      if (!update.error && lastRun && lastRun.save && results.some(r => r && r.status === 'saved')) postSummary(update);
       return;
     }
     const li = shadow.querySelector(`li[data-index="${update.index}"]`);
@@ -390,14 +471,67 @@
       $('.current').textContent = `${PAGES[update.index]}${update.message ? `: ${update.message}` : ''}…`;
       setMiniLabel(`Setup: ${PAGES[update.index]}…`);
     } else {
+      results[update.index] = update;
       finished = Math.max(finished, update.index + 1);
       setBar(finished);
+      maybePeek();
     }
+  }
+
+  // ---------- a summary of the run, posted to the record's Chatter ----------
+  // Moonfill's own Chatter code posts it (moonfillPost, in this tab), through the background script.
+  // Chatter is only drawn while the page is showing, so a hidden tab waits until the TC comes back.
+  const results = [];   // each page's last result this run
+  let lastRun = null;   // { save, values, mid, recordId }
+  function pageLine(r, i) {
+    const message = String((r && r.message) || '').replace(/\.$/, '');
+    const what = !r ? 'not started'
+      : r.status === 'saved' ? (/^Already up to date/i.test(message) ? 'already up to date' : 'saved')
+        : r.status === 'skipped' ? `skipped (${message.replace(/^Skipped:\s*/i, '')})`
+          : r.status === 'filled' ? 'filled, not saved'
+            : r.status === 'cancelled' ? 'not started (cancelled)'
+              : `needs a look: ${message}`;
+    const v = lastRun.values;
+    const detail = i === 2 && r && r.status === 'saved' && v.transactionType ? ` (${v.transactionType}, ${v.commissionType}, ${v.publisherCommission}${v.commissionType === 'Percentage' ? '%' : ''})` : '';
+    return `${(r && ICON[r.status]) || '·'} ${PAGES[i]}: ${what}${detail}`;
+  }
+  function summaryText(update) {
+    let tool = 'AutoSetup';
+    try { const m = chrome.runtime.getManifest(); tool = `${m.name} v${m.version}`; } catch { /* tests */ }
+    const offer = lastRun.values.platformOffer;
+    return [
+      `🚀 Programme setup${lastRun.mid ? ` for MID ${lastRun.mid}` : ''}${offer ? ` (${offer})` : ''}: ${update.cancelled ? 'cancelled' : update.needsLook ? 'done, some pages need a look' : 'done'}`,
+      `${update.summary}.`,
+      ...PAGES.map((p, i) => pageLine(results[i], i)),
+      $('.sv').textContent,
+      lastRun.siteNote && `Site check: ${lastRun.siteNote}`,
+      `Posted by ${tool}.`
+    ].filter(Boolean).join('\n');
+  }
+  function postSummary(update) {
+    const note = $('.chatter');
+    const text = summaryText(update);
+    const run = lastRun;
+    const post = async () => {
+      if (run !== lastRun) return;   // a new run has started since
+      note.textContent = 'Posting a summary to the record\'s Chatter…';
+      const answer = await ask({ action: 'tcaSetupChatter', text, recordId: run.recordId });
+      note.textContent = answer.ok ? '✓ Summary posted to the record\'s Chatter.'
+        : `⚠ The summary wasn't posted to Chatter: ${answer.error || 'no answer'}. Copy results has the same details.`;
+    };
+    if (document.visibilityState !== 'hidden') { post(); return; }
+    note.textContent = 'The summary will be posted to the record\'s Chatter when you come back to this tab.';
+    const onShow = () => {
+      if (document.visibilityState === 'hidden') return;
+      document.removeEventListener('visibilitychange', onShow);
+      post();
+    };
+    document.addEventListener('visibilitychange', onShow);
   }
 
   // The results as text (page, status, message, structure report), to paste to whoever maintains it.
   $('.copy').addEventListener('click', async () => {
-    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.current').textContent, $('.sv').textContent].filter(Boolean).join('\n');
+    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.current').textContent, $('.sv').textContent, $('.chatter').textContent].filter(Boolean).join('\n');
     try { await navigator.clipboard.writeText(text); $('.copy').textContent = 'Copied'; } catch { $('.copy').textContent = 'Copy failed'; }
     setTimeout(() => { $('.copy').textContent = 'Copy results'; }, 2000);
   });

@@ -52,6 +52,61 @@ test('tracking settings: URLs, the query string by Platform Offer, two tick boxe
   assert.equal((await w.TCASetupFill.verifyPage({...VALUES, platformOffer: 'Access'})).status, 'saved');
 });
 
+test('tracking settings: for Access, the query string follows the site check: utm_source=awin with no e-commerce platform', async () => {
+  const body = '<input id="MainWebsiteURL"><input id="GlobalClickThroughPage"><input id="ClickAppend"><input type="checkbox" id="DeeplinkEnabled"><input type="checkbox" id="NoDomainDeeplink"><button>Save</button>';
+  const appendFor = async values => {
+    const w = awin('/tracking-settings/us/awin/advertiser/123456/main-settings', body);
+    assert.equal((await fill(w, {...VALUES, ...values})).status, 'filled');
+    return w.document.getElementById('ClickAppend').value;
+  };
+  assert.equal(await appendFor({platformOffer: 'Access', ecommerce: false}), 'utm_source=awin', 'no supported platform found');
+  assert.equal(await appendFor({platformOffer: 'Access', ecommerce: true}), 'source=aw', 'a supported platform');
+  assert.equal(await appendFor({platformOffer: 'Access'}), 'source=aw', 'not checked: as before');
+  assert.equal(await appendFor({platformOffer: 'Accelerate', ecommerce: false}), 'source=aw&utm_source=awin&sv1=affiliate&sv_campaign_id=!!!id!!!', 'other offers unchanged');
+});
+
+async function siteCheck(answer, scenario = 'success') {
+  const chrome = fakeChrome(answer);
+  const window = await record(chrome, scenario);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(60);
+  const run = chrome.messages.find(m => m.action === 'tcaSetupRun');
+  return {run, note: ui.querySelector('.shopify').textContent, reads: chrome.messages.filter(m => m.action === 'tcaReadSite').map(m => m.via), window};
+}
+
+test('form: for Access, the site check says whether the site runs on a supported e-commerce platform', async () => {
+  const woo = await siteCheck(() => ({ok: true, status: 200, text: '<link href="/wp-content/plugins/woocommerce/x.css"><body class="woocommerce-no-js">'}));
+  assert.equal(woo.run.values.ecommerce, true);
+  assert.match(woo.note, /E-commerce platform: WooCommerce, so the query string is source=aw\./);
+  assert.deepEqual(woo.reads, ['fetch'], 'found at once: no background tab');
+
+  const plain_ = await siteCheck(() => ({ok: true, status: 200, text: '<html><body>A brochure site</body></html>'}));
+  assert.equal(plain_.run.values.ecommerce, false);
+  assert.match(plain_.note, /No supported e-commerce platform found on the site, so the query string is utm_source=awin\./);
+  assert.deepEqual(plain_.reads, ['fetch', 'tab'], 'checked again in a background tab before deciding');
+
+  const late = await siteCheck(m => (m.via === 'fetch' ? {ok: true, status: 200, text: '<html></html>'} : {ok: true, status: 200, text: 'window.Shopify cdn.shopify.com'}));
+  assert.equal(late.run.values.ecommerce, true, 'signs only the page\'s scripts add count too');
+
+  const two = await siteCheck(() => ({ok: true, status: 200, text: 'cdn.shopify.com static.wixstatic.com'}));
+  assert.equal(two.run.values.ecommerce, true, 'signs of two platforms is still an e-commerce site');
+
+  const blocked = await siteCheck(() => ({error: 'permission'}));
+  assert.equal(blocked.run.values.ecommerce, undefined, 'not checked: page 1 keeps source=aw');
+  assert.match(blocked.note, /wasn't checked: the query string is source=aw as usual/);
+
+  const down = await siteCheck(() => ({error: 'failed to fetch'}));
+  assert.equal(down.run.values.ecommerce, undefined);
+  assert.match(down.note, /couldn't be read .* source=aw as usual/);
+
+  const advanced = await siteCheck(() => ({ok: true, status: 200, text: '<html></html>'}), 'advanced');
+  assert.equal(advanced.run.values.ecommerce, undefined, 'only Access uses it');
+  assert.deepEqual(advanced.reads, ['fetch'], 'no extra background tab for other offers');
+  for (const r of [woo, plain_, late, two, blocked, down, advanced]) r.window.close();
+});
+
 test('tracking settings: waits for a new programme\'s form to appear, and finds boxes by label if their ids differ', async () => {
   const w = awin('/tracking-settings/us/awin/advertiser/123456/main-settings', '<div id="app">Loading…</div>',
     `setTimeout(() => { document.getElementById('app').innerHTML =
@@ -762,33 +817,131 @@ test('form: Hide leaves a small box above the panel; clicking it brings back the
   window.close();
 });
 
-test('form: the pixel runner runs along the bar, then cheers (8+ worked), gives a thumbs up (3-7) or is sad (under 3)', async () => {
-  const ending = async done => {
-    const chrome = fakeChrome();
-    chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
-    const window = await record(chrome);
-    await window.TCASetupForm.open();
-    const ui = formRoot(window);
-    ui.querySelector('.run').click();
-    await tick(30);
-    const img = ui.querySelector('.progress .runner');
-    const mini = ui.querySelector('.mini .runner');
-    assert.equal(img.hidden, false);
-    assert.equal(img.getAttribute('src'), 'chrome-extension://test/assets/runner.gif', 'running while it works');
-    assert.equal(mini.getAttribute('src'), 'chrome-extension://test/assets/runner.gif', 'on the small box too');
-    chrome.listener({action: 'tcaSetupProgress', index: 4, status: 'saved'});
-    assert.match(img.style.left, /50%/, 'at the front of the bar (5 of 10)');
-    chrome.listener({action: 'tcaSetupProgress', done: true, summary: 'x', ...done});
-    const src = img.getAttribute('src');
-    window.close();
-    return src.replace('chrome-extension://test/assets/', '');
-  };
-  assert.equal(await ending({needsLook: 0}), 'runner-cheer.gif', '10 worked');
-  assert.equal(await ending({needsLook: 2}), 'runner-cheer.gif', '8 worked');
-  assert.equal(await ending({needsLook: 3}), 'runner-thumbs.gif', '7 worked');
-  assert.equal(await ending({needsLook: 7}), 'runner-thumbs.gif', '3 worked');
-  assert.equal(await ending({needsLook: 8}), 'runner-sad.gif', '2 worked');
-  assert.equal(await ending({cancelled: true}), 'runner-stand.gif');
+test('form: the Awin logo rides at the front of both bars, sweeping while the setup runs, then stays whole', async () => {
+  const chrome = fakeChrome();
+  chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  const logos = [...ui.querySelectorAll('.logo')];
+  assert.equal(logos.length, 2, 'one on the full box, one on the small box');
+  for (const l of logos) assert.equal(l.querySelector('image').getAttribute('href'), 'chrome-extension://test/assets/awin-logo.png');
+  assert.equal(logos[0].querySelector('animate').getAttribute('attributeName'), 'stroke-dashoffset', 'the browser animates the sweep');
+  assert.deepEqual(logos.map(l => l.dataset.state), ['still', 'still'], 'whole before a run');
+  ui.querySelector('.run').click();
+  await tick(60);
+  assert.deepEqual(logos.map(l => l.dataset.state), ['sweep', 'sweep'], 'sweeping while it works');
+  chrome.listener({action: 'tcaSetupProgress', index: 4, status: 'saved'});
+  assert.match(logos[0].style.left, /50%/, 'at the front of the bar (5 of 10)');
+  chrome.listener({action: 'tcaSetupProgress', done: true, summary: 'x', needsLook: 0});
+  assert.deepEqual(logos.map(l => l.dataset.state), ['still', 'still'], 'whole at the end');
+  assert.equal(ui.querySelector('.runner'), null, 'the old pixel runner is gone');
+  window.close();
+});
+
+async function peekRun(random, hide) {
+  const chrome = fakeChrome();
+  chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
+  const window = await record(chrome);
+  window.Math.random = () => random;
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  if (hide) ui.querySelector('.close').click();
+  for (let i = 0; i < 3; i++) chrome.listener({action: 'tcaSetupProgress', index: i, status: 'saved'});
+  return {window, peek: ui.querySelector('.peek')};
+}
+
+test('form: the hidden guy peeks over the small box\'s bar about one run in 20, only while the box is hidden away', async () => {
+  const seen = await peekRun(0, true);   // this run is the one (random < 1/20); he peeks after page 3
+  assert.equal(seen.peek.hidden, false);
+  assert.ok(seen.peek.classList.contains('up'));
+  assert.equal(seen.peek.querySelector('img').getAttribute('src'), 'chrome-extension://test/assets/runner-peek.gif');
+  assert.ok(seen.peek.closest('.mini'), 'only ever in the small box');
+  seen.window.close();
+
+  const full = await peekRun(0, false);  // the full box is open: he stays hidden
+  assert.equal(full.peek.hidden, true);
+  full.window.close();
+
+  const usual = await peekRun(0.5, true); // most runs: no peek
+  assert.equal(usual.peek.hidden, true);
+  usual.window.close();
+});
+
+async function chatterRun({save = true, scenario = 'success', updates, done = {summary: '3 saved, 2 skipped, 5 not started', needsLook: 0}, hidden = false} = {}) {
+  const chrome = fakeChrome();
+  const window = await record(chrome, scenario);
+  if (hidden) Object.defineProperty(window.document, 'visibilityState', {value: 'hidden', configurable: true});
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector(save ? '.run' : '.fill-only').click();
+  await tick(30);
+  for (const u of updates || [
+    {index: 0, status: 'saved', message: 'Saved and checked.'},
+    {index: 1, status: 'skipped', message: 'Skipped: comes pre-filled.'},
+    {index: 2, status: 'saved', message: 'Saved and checked.'},
+    {index: 3, status: 'failed', message: 'The Add Plugin button wasn\'t found.', diagnostics: 'structure'},
+    {index: 4, status: 'saved', message: 'Saved.'}
+  ]) chrome.listener({action: 'tcaSetupProgress', ...u});
+  chrome.listener({action: 'tcaSetupProgress', done: true, ...done});
+  await tick(30);
+  return {chrome, window, ui, posts: () => chrome.messages.filter(m => m.action === 'tcaSetupChatter')};
+}
+
+test('form: after Run and save, a summary of what was done is posted to the record\'s Chatter', async () => {
+  const {window, ui, posts} = await chatterRun();
+  assert.equal(posts().length, 1);
+  const lines = posts()[0].text.split('\n');
+  assert.equal(lines[0], '🚀 Programme setup for MID 123456 (Access): done');
+  assert.equal(lines[1], '3 saved, 2 skipped, 5 not started.');
+  assert.deepEqual(lines.slice(2, 8), [
+    '✓ Tracking settings: saved',
+    '⏭ Invite user: skipped (comes pre-filled)',
+    '✓ Commission groups: saved (Sale, Percentage, 5%)',
+    '⚠ Plugin store: needs a look: The Add Plugin button wasn\'t found',
+    '✓ Tracking tag settings: saved',
+    '· Account details: not started'
+  ]);
+  assert.match(lines.at(-1), /^Posted by /);
+  assert.doesNotMatch(posts()[0].text, /structure/, 'no diagnostics in Chatter');
+  assert.equal(ui.querySelector('.chatter').textContent, '✓ Summary posted to the record\'s Chatter.');
+  window.close();
+});
+
+test('form: no Chatter post after Fill only, or when nothing was saved', async () => {
+  const fill = await chatterRun({save: false, updates: [{index: 0, status: 'filled', message: 'Filled, not saved.'}]});
+  assert.equal(fill.posts().length, 0);
+  fill.window.close();
+  const none = await chatterRun({updates: [{index: 0, status: 'failed', message: 'Nope.'}], done: {summary: '1 need a look', needsLook: 1}});
+  assert.equal(none.posts().length, 0);
+  none.window.close();
+});
+
+test('form: with the record tab in the background, the summary waits and is posted when the TC comes back', async () => {
+  const {window, ui, posts} = await chatterRun({hidden: true});
+  assert.equal(posts().length, 0);
+  assert.match(ui.querySelector('.chatter').textContent, /will be posted .* when you come back to this tab/);
+  Object.defineProperty(window.document, 'visibilityState', {value: 'visible', configurable: true});
+  window.document.dispatchEvent(new window.Event('visibilitychange'));
+  await tick(30);
+  assert.equal(posts().length, 1);
+  window.close();
+});
+
+test('background: the summary is handed to Moonfill\'s Chatter code in the record tab that asked', async () => {
+  const listeners = [];
+  const sent = [];
+  const ctx = vm.createContext({console, setTimeout, clearTimeout, setInterval, clearInterval, URL});
+  ctx.chrome = {runtime: {onMessage: {addListener: l => listeners.push(l)}}, tabs: {sendMessage: async (tabId, m) => { sent.push([tabId, m]); return {ok: true}; }}};
+  vm.runInContext(read('setup/background.js'), ctx);
+  const ask = (message, sender) => new Promise(resolve => { for (const l of listeners) if (l(message, sender, resolve) === true) return; resolve('unanswered'); });
+  const answer = await ask({action: 'tcaSetupChatter', text: 'hello', recordId: 'a0X1'}, {tab: {id: 42}});
+  assert.deepEqual(plain(answer), {ok: true});
+  assert.equal(sent[0][0], 42);
+  assert.deepEqual(plain(sent[0][1]), {action: 'moonfillPost', text: 'hello', recordId: 'a0X1', share: true, fast: false, activated: false});
+  assert.deepEqual(plain(await ask({action: 'tcaSetupChatter', text: 'x'}, {})), {ok: false, error: 'no record tab or text'});
 });
 
 test('form: the small box\'s ✕ cancels the run', async () => {
