@@ -65,8 +65,8 @@ globalThis.TCA_CONFIG = {
     validationPeriod: 'Auto validation period'
   },
 
-  // For these Platform Offers, Fill also sets the "SingleView Setup" checklist (below the Technical
-  // Checklist). Left alone for any other offer, or if the record has no such section.
+  // For these Platform Offers, the 🚀 setup also sets the record's "SingleView Setup" checklist when it
+  // starts (setup/form.js). The Technical Checklist fill leaves it alone.
   singleView: {
     offers: ['Accelerate', 'Advanced'],
     section: 'SingleView Setup',

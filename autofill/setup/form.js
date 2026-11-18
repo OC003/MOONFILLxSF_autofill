@@ -183,6 +183,7 @@
         <button type="button" class="stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
       </div>
       <div class="current" role="status" aria-live="polite">Starting…</div>
+      <div class="note sv"></div>
       <details><summary>Details</summary>
         <ol>${PAGES.map((p, i) => `<li data-index="${i}"><span class="icon">·</span> ${p} <span class="msg"></span></li>`).join('')}</ol>
       </details>
@@ -294,6 +295,28 @@
     $('.current').textContent = 'Starting…';
     for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
     setBar(0);
+    setSingleView(values.platformOffer, save);   // on this record tab, while the setup works in its own tabs
+  }
+
+  // Accelerate and Advanced programmes get the record's "SingleView Setup" checklist set at the start
+  // of the setup: saved with Run and save, left unsaved with Fill only. A problem here only gets a
+  // note: the setup pages carry on.
+  async function setSingleView(offer, save) {
+    const sv = cfg.singleView;
+    const note = $('.sv');
+    note.textContent = '';
+    if (!sv || !sv.offers.some(o => o.toLowerCase() === String(offer).toLowerCase())) return;
+    note.textContent = `${sv.section}: setting it on the record…`;
+    const fields = Object.entries(sv.values).map(([label, value]) => ({ label, value, excluded: false }));
+    let result;
+    try {
+      result = await engine.run(document, { ...cfg, checklistTitle: sv.section }, fields, { mode: save ? 'save' : 'fill' });
+    } catch (error) {
+      result = { status: 'failed', message: error.message };
+    }
+    note.textContent = result.status === 'saved' ? `✓ ${sv.section} saved on the record (${Object.values(sv.values).join(', ')}).`
+      : result.status === 'filled' ? `✎ ${sv.section} filled on the record, not saved: check it, then click Salesforce's Save.`
+        : `⚠ ${sv.section} wasn't set: ${result.message}`;
   }
 
   // The runner: running while the setup works. At the end, by how many of the 10 pages worked (saved,
@@ -374,7 +397,7 @@
 
   // The results as text (page, status, message, structure report), to paste to whoever maintains it.
   $('.copy').addEventListener('click', async () => {
-    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.current').textContent].join('\n');
+    const text = [`MID ${mid.replace(/\d{4,}/g, '#')} setup`, ...[...shadow.querySelectorAll('li')].map(li => li.textContent.replace(/\s+/g, ' ').trim()), $('.current').textContent, $('.sv').textContent].filter(Boolean).join('\n');
     try { await navigator.clipboard.writeText(text); $('.copy').textContent = 'Copied'; } catch { $('.copy').textContent = 'Copy failed'; }
     setTimeout(() => { $('.copy').textContent = 'Copy results'; }, 2000);
   });

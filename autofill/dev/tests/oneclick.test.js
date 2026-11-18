@@ -703,23 +703,14 @@ test('"Clear checklist" with Fill & save asks first; cancelling changes nothing'
 
 // ---------- SingleView Setup (Accelerate / Advanced) ----------
 
-test('lightning: for an Advanced programme, Fill & save also sets SingleView Setup (MasterTag Enabled, New)', async () => {
+test('lightning: the checklist fill leaves SingleView Setup alone, even for Advanced (the 🚀 setup sets it)', async () => {
   const window = await open('lightning', 'advanced');
-  const status = await press(window, 'save');
-  assert.equal(status.dataset.state, 'saved', status.textContent);
-  assert.equal(key(window, 'SingleView Setup Type', 'SingleView Setup'), 'MasterTag Enabled');
-  assert.equal(key(window, 'SingleView Integration Status', 'SingleView Setup'), 'New');
-  assert.equal(key(window, 'Server to server'), 'Yes', 'the Technical Checklist is filled as usual');
-  assert.equal(key(window, 'Img tag implemented', 'Commercial Checklist'), 'No', 'other checklists stay');
-  assert.match(status.textContent, /Advanced: SingleView Setup set too\./);
-});
-
-test('lightning: for Access, SingleView Setup is left alone', async () => {
-  const window = await open('lightning');
   const status = await press(window, 'save');
   assert.equal(status.dataset.state, 'saved', status.textContent);
   assert.ok(!key(window, 'SingleView Setup Type', 'SingleView Setup'));
   assert.ok(!key(window, 'SingleView Integration Status', 'SingleView Setup'));
+  assert.equal(key(window, 'Server to server'), 'Yes', 'the Technical Checklist is filled as usual');
+  assert.doesNotMatch(status.textContent, /SingleView/);
 });
 
 test('engine: an optional field in a section the record doesn\'t have is skipped with a note', async () => {

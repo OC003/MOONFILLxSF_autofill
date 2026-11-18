@@ -149,8 +149,7 @@
       say(mode === 'save' ? 'Filling and saving…' : 'Filling…');
       const run = effective(template);
       if (clearing()) notes.push('Clear checklist:');
-      const extra = clearing() ? [] : singleViewFields(notes);
-      result = await engine.run(document, run.cfg, clearing() ? clearFields() : [...run.fields, ...extra], { mode });
+      result = await engine.run(document, run.cfg, clearing() ? clearFields() : run.fields, { mode });
     } catch (error) {
       result = { status: 'failed', message: `Unexpected error: ${error.message}` };
     }
@@ -158,16 +157,6 @@
     paint();
     detect();
     recordUsage(mode, result);
-  }
-
-  // Accelerate and Advanced programmes also get their "SingleView Setup" checklist set.
-  function singleViewFields(notes) {
-    const sv = cfg.singleView;
-    if (!sv || !cfg.platformOfferLabel) return [];
-    const offer = ((engine.recordField(document, cfg, cfg.platformOfferLabel).find(f => f.text) || {}).text || '').trim();
-    if (!sv.offers.some(o => o.toLowerCase() === offer.toLowerCase())) return [];
-    notes.push(`${offer}: ${sv.section} set too.`);
-    return Object.entries(sv.values).map(([label, value]) => ({ label, value, excluded: false, section: sv.section, optional: true }));
   }
 
   // Usage reporting: one record per Fill, sent to the background script. Only the outcome and a

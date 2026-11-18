@@ -74,7 +74,7 @@ The other 15 fields, such as Tech notes, are left untouched. If the Implementati
 
 Template values only fill **empty** fields, so an answer that's already there is kept. If there's no Landing Page URL, no platform is recognised, or the signs point to two platforms, the default fill is used and the panel says why. Detection needs permission to read websites, which you grant once in Settings (**Allow platform detection**). Until then, the default fill is used.
 
-**SingleView Setup.** For **Accelerate** and **Advanced** programmes (the record's Platform Offer), Fill also sets the **SingleView Setup** checklist below the Technical Checklist: SingleView Setup Type → **MasterTag Enabled**, SingleView Integration Status → **New**. For Access, it's left alone.
+**SingleView Setup.** For **Accelerate** and **Advanced** programmes (the record's Platform Offer), the 🚀 setup sets the record's **SingleView Setup** checklist as it starts: SingleView Setup Type → **MasterTag Enabled**, SingleView Integration Status → **New**. **Run and save** saves it; **Fill only** leaves it unsaved. The result shows under the progress bar. For Access, and in the Technical Checklist fill, it's left alone.
 
 **Settings.** For every checklist field you can choose:
 - **Team default** (the agreed answer)

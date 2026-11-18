@@ -632,6 +632,51 @@ test('form: Run and save starts the run with the record\'s values; Fill only sta
   assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupRun').at(-1).save, false);
 });
 
+async function singleViewNote(ui) {
+  for (let i = 0; i < 300; i++) {
+    const text = ui.querySelector('.sv').textContent;
+    if (/^[✓✎⚠]/.test(text)) return text;
+    await tick(20);
+  }
+  throw new Error(`SingleView note never finished: "${ui.querySelector('.sv').textContent}"`);
+}
+const sv = (window, label) => window.mockRecord[`SV::${label}`];
+
+test('form: for Advanced, Run and save sets and saves SingleView Setup on the record as the setup starts', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome, 'advanced');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  const checklist = () => JSON.stringify(Object.entries(window.mockRecord).filter(([k]) => !k.startsWith('SV::')));
+  const before = checklist();
+  ui.querySelector('.run').click();
+  const note = await singleViewNote(ui);
+  assert.equal(note, '✓ SingleView Setup saved on the record (MasterTag Enabled, New).');
+  assert.equal(sv(window, 'SingleView Setup Type'), 'MasterTag Enabled');
+  assert.equal(sv(window, 'SingleView Integration Status'), 'New');
+  assert.ok(chrome.messages.some(m => m.action === 'tcaSetupRun'), 'the setup pages still run');
+  assert.equal(checklist(), before, 'nothing else on the record is changed');
+});
+
+test('form: for Advanced, Fill only fills SingleView Setup without saving it', async () => {
+  const window = await record(fakeChrome(), 'advanced');
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.fill-only').click();
+  assert.match(await singleViewNote(ui), /^✎ SingleView Setup filled on the record, not saved/);
+  assert.ok(!sv(window, 'SingleView Setup Type'), 'nothing saved');
+});
+
+test('form: for Access, SingleView Setup is left alone', async () => {
+  const window = await record(fakeChrome());
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(300);
+  assert.equal(ui.querySelector('.sv').textContent, '');
+  assert.ok(!sv(window, 'SingleView Setup Type'));
+});
+
 test('form: a non-Percentage commission is left for the TC; a missing amount is flagged', async () => {
   const fixed = await record(fakeChrome(), 'fixed');
   const v = fixed.TCASetupForm.readRecord().values;
