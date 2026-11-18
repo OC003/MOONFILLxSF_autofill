@@ -100,15 +100,6 @@
   }
 
   // ---------- the dialog ----------
-  // The Awin logo with its circular sweep: a mask circle whose dash grows clockwise from 12 o'clock
-  // (the logo appears), holds, then moves on (the logo clears), and so on. The browser animates it
-  // (SVG <animate>), so no script runs for it. data-state="still" drops the mask: the logo stays whole.
-  const C = 71.13;   // the mask circle's length: 2π × 11.32 (its stroke covers the whole 32 × 32 square)
-  const logoSvg = (id, cls) => `<svg class="logo${cls}" viewBox="0 0 32 32" aria-hidden="true" data-state="still"><defs><mask id="${id}">` +
-    `<circle cx="16" cy="16" r="11.32" fill="none" stroke="#fff" stroke-width="22.64" stroke-dasharray="${C} ${C}" transform="rotate(-90 16 16)">` +
-    `<animate attributeName="stroke-dashoffset" values="${C};0;0;-${C};-${C}" keyTimes="0;0.375;0.5;0.875;1" dur="2.4s" repeatCount="indefinite"/></circle>` +
-    `</mask></defs><image width="32" height="32" mask="url(#${id})"/></svg>`;
-
   const host = document.createElement('div');
   host.id = 'tca-setup-form';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -129,13 +120,13 @@
   button:disabled { opacity: .5; cursor: default; }
   button.link { border: 0; padding: 6px 4px; text-decoration: underline; margin-right: auto; }
   .bar-row { display: flex; align-items: flex-end; gap: 10px; }
-  /* The Awin logo rides along the front of the progress bar, with a circular sweep while the setup runs. */
-  .track { position: relative; flex: 1; padding-top: 38px; }
+  /* The Awin logo, as a little pixel fire, rides along the front of the progress bar: it flickers while
+     the setup runs, then stands still. The sprite is 24 × 27 pixels: 2× in the box, 1× in the small box. */
+  .track { position: relative; flex: 1; padding-top: 60px; }
   .track .bar { width: 100%; }
-  .logo { position: absolute; bottom: 14px; left: 0; width: 32px; height: 32px; transform: translateX(-50%); transition: left .4s ease-out; pointer-events: none; overflow: visible; }
-  .logo[data-state="still"] image { mask: none; }
-  .mini .track { padding-top: 24px; }
-  .mini .logo { width: 18px; height: 18px; bottom: 9px; }
+  .logo { position: absolute; bottom: 8px; left: 0; width: 48px; height: 54px; image-rendering: pixelated; transform: translateX(-50%); transition: left .4s ease-out; pointer-events: none; }
+  .mini .track { padding-top: 32px; }
+  .mini .logo { width: 24px; height: 27px; bottom: 4px; }
   /* The hidden guy: now and then he peeks up from behind the small box's bar, then ducks back down. */
   .peek { position: absolute; bottom: 6px; width: 18px; height: 13px; overflow: hidden; transform: translateX(-50%); pointer-events: none; }
   .peek img { display: block; width: 18px; height: 13px; image-rendering: pixelated; transform: translateY(100%); }
@@ -215,7 +206,7 @@
     </form>
     <div class="progress" hidden>
       <div class="bar-row">
-        <div class="track">${logoSvg('tca-logo-sweep', '')}<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div></div>
+        <div class="track"><img class="logo" alt="" data-state="still"><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div class="fill"></div></div></div>
         <span class="count">0 / 10</span>
         <button type="button" class="stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
       </div>
@@ -236,7 +227,7 @@
     <button type="button" class="stop mini-stop" title="Cancel the setup" aria-label="Cancel the setup">✕</button>
     <button type="button" class="dismiss" title="Dismiss" aria-label="Dismiss" hidden>×</button>
   </div>
-  <div class="track"><span class="peek" aria-hidden="true" hidden><img alt=""></span>${logoSvg('tca-logo-sweep-mini', ' mini-logo')}<div class="bar"><div class="fill mini-fill"></div></div></div>
+  <div class="track"><span class="peek" aria-hidden="true" hidden><img alt=""></span><img class="logo mini-logo" alt="" data-state="still"><div class="bar"><div class="fill mini-fill"></div></div></div>
 </div>`;
   const $ = sel => shadow.querySelector(sel);
   let mid = '';
@@ -343,7 +334,7 @@
     $('.current').textContent = 'Starting…';
     for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
     setBar(0);
-    startSweep();
+    startFire();
     setSingleView(values.platformOffer, save);   // on this record tab, while the setup works in its own tabs
   }
 
@@ -369,23 +360,22 @@
   }
 
   // ---------- the Awin logo at the front of the bar ----------
-  // It sweeps while the setup runs (see logoSvg) and stays whole at the end. It sits at the front of
-  // the bar (never off its ends).
+  // A pixel fire in the logo's shape and colours (drawn by autofill/dev/fire-sprite.py): flickering while
+  // the setup runs, its first frame when the run ends. It sits at the front of the bar (never off its ends).
   const asset = name => { try { return chrome.runtime.getURL(`assets/${name}`); } catch { return ''; } };
-  for (const image of shadow.querySelectorAll('.logo image')) image.setAttribute('href', asset('awin-logo.png'));
-  function setSweep(on) {
-    for (const svg of shadow.querySelectorAll('.logo')) {
-      svg.dataset.state = on ? 'sweep' : 'still';
-      try {
-        if (on) { svg.setCurrentTime(0); svg.unpauseAnimations(); } else svg.pauseAnimations();
-      } catch { /* no SVG animation API (tests) */ }
+  function setFire(on) {
+    for (const img of shadow.querySelectorAll('.logo')) {
+      img.dataset.state = on ? 'fire' : 'still';
+      const src = asset(on ? 'awin-fire.gif' : 'awin-fire-still.png');
+      if (src && img.getAttribute('src') !== src) img.src = src;
     }
   }
-  const startSweep = () => setSweep(true);
-  const stopSweep = () => setSweep(false);
+  setFire(false);
+  const startFire = () => setFire(true);
+  const stopFire = () => setFire(false);
   function placeLogo(n) {
     for (const el of shadow.querySelectorAll('.logo')) {
-      const half = el.classList.contains('mini-logo') ? 9 : 16;
+      const half = el.classList.contains('mini-logo') ? 12 : 24;
       el.style.left = `clamp(${half}px, ${(n / PAGES.length) * 100}%, calc(100% - ${half}px))`;
     }
   }
@@ -456,7 +446,7 @@
       $('.close').textContent = 'Close';
       $('.progress').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
       if (!update.cancelled) setBar(PAGES.length);
-      stopSweep();
+      stopFire();
       // A summary for the record's Chatter, when something was saved (Run and save only).
       if (!update.error && lastRun && lastRun.save && results.some(r => r && r.status === 'saved')) postSummary(update);
       return;

@@ -817,24 +817,24 @@ test('form: Hide leaves a small box above the panel; clicking it brings back the
   window.close();
 });
 
-test('form: the Awin logo rides at the front of both bars, sweeping while the setup runs, then stays whole', async () => {
+test('form: the Awin logo rides at the front of both bars as a pixel fire, flickering while the setup runs, then still', async () => {
   const chrome = fakeChrome();
   chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
   const window = await record(chrome);
   await window.TCASetupForm.open();
   const ui = formRoot(window);
   const logos = [...ui.querySelectorAll('.logo')];
+  const src = () => logos.map(l => l.getAttribute('src').replace('chrome-extension://test/assets/', ''));
   assert.equal(logos.length, 2, 'one on the full box, one on the small box');
-  for (const l of logos) assert.equal(l.querySelector('image').getAttribute('href'), 'chrome-extension://test/assets/awin-logo.png');
-  assert.equal(logos[0].querySelector('animate').getAttribute('attributeName'), 'stroke-dashoffset', 'the browser animates the sweep');
-  assert.deepEqual(logos.map(l => l.dataset.state), ['still', 'still'], 'whole before a run');
+  assert.deepEqual(src(), ['awin-fire-still.png', 'awin-fire-still.png'], 'still before a run');
   ui.querySelector('.run').click();
   await tick(60);
-  assert.deepEqual(logos.map(l => l.dataset.state), ['sweep', 'sweep'], 'sweeping while it works');
+  assert.deepEqual(src(), ['awin-fire.gif', 'awin-fire.gif'], 'flickering while it works');
+  assert.deepEqual(logos.map(l => l.dataset.state), ['fire', 'fire']);
   chrome.listener({action: 'tcaSetupProgress', index: 4, status: 'saved'});
   assert.match(logos[0].style.left, /50%/, 'at the front of the bar (5 of 10)');
   chrome.listener({action: 'tcaSetupProgress', done: true, summary: 'x', needsLook: 0});
-  assert.deepEqual(logos.map(l => l.dataset.state), ['still', 'still'], 'whole at the end');
+  assert.deepEqual(src(), ['awin-fire-still.png', 'awin-fire-still.png'], 'still at the end');
   assert.equal(ui.querySelector('.runner'), null, 'the old pixel runner is gone');
   window.close();
 });

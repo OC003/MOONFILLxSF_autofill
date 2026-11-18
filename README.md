@@ -117,7 +117,7 @@ Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. **Det
 
 **Summary in Chatter.** After **Run and save**, if at least one page was saved, a summary is posted to the record's **Chatter**: each page's result (saved, skipped and why, needs a look and why, not started), the commission group used and the SingleView Setup result. If the record tab isn't in front when the run ends, it's posted as soon as you come back to it. **Fill only** posts nothing. Posting opens the record's Chatter tab.
 
-While the setup runs, the **Awin logo** at the front of the progress bar shows and clears itself in a circular sweep. It stays whole when the run ends.
+While the setup runs, the **Awin logo** at the front of the progress bar is a little pixel fire, flickering in the logo's own shape and colours. It stands still when the run ends.
 
 ### Fields filled by both
 
