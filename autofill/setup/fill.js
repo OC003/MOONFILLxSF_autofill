@@ -609,7 +609,10 @@
         if (!now || !codeShown(now)) fail(`The plugin code didn't stay in the ${box.kind} (${describeBox(now || box)}).`);
         return { note: `Code ${how}: ${describeBox(now)}.` };
       },
-      save: () => button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], pluginScope || doc().body)
+      save: () => button(['Save', 'Add', 'Add Plugin', 'Confirm', 'Submit', 'Install'], pluginScope || doc().body),
+      // The plugin store shows no confirmation after saving (it saves fine in live runs): no error
+      // shown counts as saved. Only after Save: a greyed-out Save still fails here.
+      noConfirmation: true
     },
     {
       key: 'tag', name: 'Tracking tag settings', match: /\/advertiser-mastertag\/.*\/trackingtagsettings/,
@@ -729,6 +732,7 @@
     const checks = page.verify ? page.verify(values) : [];
     if (checks.length && checks.every(Boolean)) return { status: 'saved', message: 'Saved and checked.', page: page.key };
     if (!checks.length && successShown()) return { status: 'saved', message: 'Saved.', page: page.key };
+    if (!checks.length && page.noConfirmation) return { status: 'saved', message: 'Saved (this page shows no confirmation; no error was shown).', page: page.key };
     return { status: 'unconfirmed', message: checks.length ? 'Saved, but the page doesn\'t show every value afterwards: check it.' : 'Save was clicked; the page showed no confirmation: check it.', page: page.key };
   }
 

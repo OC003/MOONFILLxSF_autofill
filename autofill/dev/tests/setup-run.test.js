@@ -412,6 +412,17 @@ test('tracking tag settings: no confirmation after Save, but no error either, co
   assert.equal((await w.TCASetupFill.verifyPage(VALUES)).status, 'saved');
 });
 
+test('plugin store: no confirmation after Save, but no error either, counts as saved', async () => {
+  const w = awin('/advertiser-mastertag/us/awin/123456/plugins', '<p>Plugins</p>');
+  const result = await w.TCASetupFill.verifyPage(VALUES);
+  assert.deepEqual([result.status, result.message], ['saved', 'Saved (this page shows no confirmation; no error was shown).']);
+});
+
+test('plugin store: an error shown after Save is still a failure', async () => {
+  const w = awin('/advertiser-mastertag/us/awin/123456/plugins', '<div class="alert alert-danger">Plugin could not be added</div>');
+  assert.equal((await w.TCASetupFill.verifyPage(VALUES)).status, 'failed');
+});
+
 test('commission groups (ag-Grid): a till-style number box (5 → 0.05%) is given 5.00 so it holds 5%', async () => {
   const w = agGridPage({till: true});
   const result = await fill(w, {...VALUES, publisherCommission: '5'});

@@ -106,7 +106,7 @@ You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**
 | Tracking settings | Website URL, Landing Page, query string append (by Platform Offer), Link Builder and relative URLs ticked, Add to Accepted Domains |
 | Invite user, Fee manager | skipped (they come pre-filled) |
 | Commission groups | Add Default Commission Group, then Transaction Type, Commission Type, Publisher Commission |
-| Plugin store | Not for Access. Otherwise adds **R.O.EYE - Consent - SingleView** with its code line |
+| Plugin store | Not for Access. Otherwise adds **R.O.EYE - Consent - SingleView** with its code line. The page shows no confirmation after saving, so no error counts as saved |
 | Tracking tag settings | **Conversion Tag and Image Pixel integrated** (the page is reloaded first) |
 | Account details | IP tracking, and stripping the referrer path when it has no valid domain |
 | Mobile tracking | **Tracking is implemented on mobile site** |
