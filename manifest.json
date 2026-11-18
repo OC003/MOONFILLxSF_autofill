@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "UI_AutoSetup_Prototype",
-  "version": "2.1",
+  "version": "3.0.1.1",
+  "version_name": "3.0.1 AutoSetup prototype",
   "description": "Run Moonpull scans from Salesforce in one click, and fill in and save the Technical Checklist in one click.",
   "permissions": ["tabs", "storage", "activeTab", "scripting", "webRequest", "alarms", "notifications", "tabGroups"],
   "host_permissions": [

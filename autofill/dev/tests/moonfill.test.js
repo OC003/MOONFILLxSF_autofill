@@ -7,12 +7,12 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../../../background.js', import.meta.url), 'utf8');
 
 // Every chrome.* call does nothing (and storage reads come back empty), so the script loads quietly.
-function quietChrome() {
+function quietChrome(manifest = {version: 'test'}) {
   const fn = () => {};
   const handler = {
     get: (target, key) => {
       if (key === 'get') return async () => ({});
-      if (key === 'getManifest') return () => ({version: 'test'});
+      if (key === 'getManifest') return () => manifest;
       return new Proxy(fn, handler);
     },
     apply: () => Promise.resolve()
@@ -20,8 +20,8 @@ function quietChrome() {
   return new Proxy(fn, handler);
 }
 
-function load(answer) {
-  const context = vm.createContext({console, setTimeout, clearTimeout, URL, crypto, chrome: quietChrome(), importScripts: () => {}});
+function load(answer, manifest) {
+  const context = vm.createContext({console, setTimeout, clearTimeout, URL, crypto, chrome: quietChrome(manifest), importScripts: () => {}});
   context.fetch = async url => answer(url);
   vm.runInContext(source, context);
   return context;
@@ -66,4 +66,11 @@ test('moonfill: a sign-in page while waiting keeps the scan waiting, and nothing
   assert.equal(job.state, 'waiting');
   assert.equal(job.errors, 1, 'counted as a failed read: after 6 the TC is asked to sign in');
   assert.equal(job.resultText, undefined);
+});
+
+test('moonfill: each post says which build posted it (the version name when the manifest has one)', () => {
+  assert.match(load(() => reply('')).withPromo('x'), /^Pasted via Moonfill vtest\nx$/);
+  const prototype = load(() => reply(''), {version: '3.0.1.1', version_name: '3.0.1 AutoSetup prototype'});
+  assert.match(prototype.withPromo('x'), /^Pasted via Moonfill v3\.0\.1 AutoSetup prototype\nx$/);
+  assert.equal(prototype.withPromo(prototype.withPromo('x')).match(/Pasted via/g).length, 1, 'never twice');
 });

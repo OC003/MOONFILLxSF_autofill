@@ -497,7 +497,7 @@
   }
   function summaryText(update) {
     let tool = 'AutoSetup';
-    try { const m = chrome.runtime.getManifest(); tool = `${m.name} v${m.version}`; } catch { /* tests */ }
+    try { const m = chrome.runtime.getManifest(); tool = `${m.name} v${m.version_name || m.version}`; } catch { /* tests */ }
     const offer = lastRun.values.platformOffer;
     return [
       `🚀 Programme setup${lastRun.mid ? ` for MID ${lastRun.mid}` : ''}${offer ? ` (${offer})` : ''}: ${update.cancelled ? 'cancelled' : update.needsLook ? 'done, some pages need a look' : 'done'}`,

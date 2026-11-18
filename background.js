@@ -153,7 +153,8 @@ function cleanResult(text) {
 // The version is read from manifest.json, so bumping it there updates every post.
 function withPromo(text) {
   if (/^\s*Pasted via Moonfill/i.test(text)) return text; // never twice
-  return `Pasted via Moonfill v${chrome.runtime.getManifest().version}\n${text}`;
+  const m = chrome.runtime.getManifest();   // version_name, when set, says which build posted it
+  return `Pasted via Moonfill v${m.version_name || m.version}\n${text}`;
 }
 
 // ---------- job storage (one key per job, so jobs never overwrite each other) ----------

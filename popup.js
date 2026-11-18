@@ -140,7 +140,7 @@ function tick() {
 
 document.addEventListener("DOMContentLoaded", () => {
   const v = document.querySelector(".version");
-  if (v) v.textContent = "v" + chrome.runtime.getManifest().version;
+  if (v) v.textContent = "v" + (chrome.runtime.getManifest().version_name || chrome.runtime.getManifest().version);
   render();
   setInterval(tick, 1000);
   chrome.storage.onChanged.addListener((changes, area) => {
