@@ -1,28 +1,30 @@
-# 🌙 Moonfill x SF_autofill
+# 🚀 UI AutoSetup prototype: Moonfill, Checklist Autofill, AutoSetup and Internal Review
 
-**Two one-click jobs on Salesforce: run a Moonpull integration scan with the result posted in the record's Chatter, and fill in and save the record's Technical Checklist.**
+**Four tools for Awin Technical Consultants in one browser extension (Edge or Chrome), each run in one click from the programme's Salesforce Implementation record.**
 
-Moonfill is a browser extension for Awin agents. Before, you had to fill in the Moonpull form, wait for the result in Teams, copy it and paste it into Salesforce, then work through the Technical Checklist field by field. Now one button runs the scan and posts the result, and another fills in the checklist and saves it.
+| Tool | What it does | Where to find it | Built by |
+|---|---|---|---|
+| **🌙 Moonfill** (Moonpull scans) | Submits the Moonpull form for the record, waits for the scan, posts the result to the record's Chatter and fills the five scan fields. Also opens the New Implementation and IR pages as a tab group | **🌙 Submit Moonpull form** on the record | **Rodier Sangibala** |
+| **📋 Checklist Autofill** (SalesforceAutofill) | Fills the agreed answers into the Technical Checklist (30 of its 45 fields, with templates for 13 eCommerce platforms), checks nothing else changed, and saves | **Checklist Autofill** panel (or the floating button), bottom right of the record | **Oscar Coleman** |
+| **🚀 AutoSetup** (New Implementation setup) | Sets up a new programme in the Awin UI from the record: fills and saves the ten setup pages one by one, then posts a summary to Chatter | **🚀 New Implementation** on the record | **Oscar Coleman** |
+| **🔎 Internal Review** (Optimus IR) | Reviews the programme in the Awin UI against the setup's Chatter note, fixes what it may, deletes the test transactions, fills blank record fields and posts a short report to Chatter for the integrator | **🔎 IR** on the record | **Kaio Da Mota** |
 
-| | What it does | Where to find it |
-|---|---|---|
-| **Moonpull scan** | Submits the Moonpull form for the record, waits for the result, posts it to Chatter and fills the scan fields | **🌙 Submit Moonpull form** button on the record |
-| **Technical Checklist** | Fills the agreed values into the Technical Checklist and saves the record | **Checklist Autofill** panel, bottom right of the record |
-| **New Implementation setup** | Fills and saves the ten Awin UI setup pages from the record | **🚀 New Implementation** |
-| **Internal Review** (Optimus IR) | Checks and fixes the Awin UI, deletes the test transactions, updates the record and reports to Chatter | **🔎 IR** on an Implementation record |
+Before, a TC filled in the Moonpull form and copied its result from Teams, went through the Technical Checklist field by field, opened ten Awin pages to set a programme up, and checked them all again for the Internal Review. Now each of those is one click, and the four work together: Moonfill fills the scan fields the checklist leaves alone, the setup's Chatter note is what the review checks against, and no two of them edit the record at the same time.
+
+This is the **prototype**: AutoSetup and the Internal Review are being tested here before they join the team release (Moonfill and the Checklist Autofill only).
 
 ---
 
 ## Why use it
 
-- **One click each.** No typing the MID or region, no form to fill in, no copy and paste, no going through the checklist field by field.
-- **Nothing to remember.** Moonfill reads the program, MID and country from the Salesforce record. The checklist values are the team's agreed answers, and the record's creation date is taken from its history.
-- **Work on something else.** While a scan runs (usually up to 10 minutes) you can use other tabs and other apps.
+- **One click each.** No typing the MID or region, no form to fill in, no copy and paste, no going through the checklist field by field, no opening the Awin pages one by one.
+- **Nothing to remember.** The program, MID, country, offer, commission and validation period are read from the Salesforce record (and, for the review, from the setup's Chatter note). The checklist values are the team's agreed answers.
+- **Work on something else.** Scans, setups and reviews run in background tabs while you use other tabs and apps.
 - **Several scans at once.** Start as many as you like, for the same client or different ones. Each result goes to its own record.
-- **Always visible.** One click on the Moonfill icon shows what is running, what is done and what needs attention. The checklist panel says exactly what it filled and saved.
-- **Safe by design.** Before posting, Moonfill checks that the result belongs to the MID you scanned. Before saving the checklist, it checks that nothing else on the record has changed. If either check fails, nothing is posted or saved.
-- **A safety net.** If a post goes wrong, a **Force paste** button and a **Copy result** button are one click away, and the Teams message still arrives as usual. For the checklist, **Fill only** fills the fields without saving, so you can check them first.
-- **Your way.** In **Settings**, you can change what any checklist field is filled with.
+- **Always visible.** The Moonfill icon shows every scan; the checklist panel says exactly what it filled; the setup and the review show each page's progress and post a summary to Chatter.
+- **Safe by design.** Moonfill checks the result belongs to the MID you scanned. The checklist checks nothing else on the record changed before saving. The setup and the review check you're signed in to Awin and work on that one MID only, and the review deletes only that MID's test transactions. If a check fails, nothing is posted or saved.
+- **A safety net.** **Force paste** and **Copy result** for scans; **Fill only** for the checklist and the setup; **Retry failed pages** for the setup; **Retry Salesforce + Chatter** for the review.
+- **Your way.** In **Settings**, you can change what any checklist field is filled with, and choose the panel or a floating button.
 
 ---
 
@@ -139,7 +141,7 @@ While the setup runs, the **Awin logo** at the front of the progress bar is a li
 
 ### Internal Review
 
-**🔎 IR** on an Implementation record opens the **Internal Review** panel (Optimus IR v0.2.23, by its own author, folded into this prototype) in a small window next to the record:
+**🔎 IR** on an Implementation record opens the **Internal Review** panel (Optimus IR v0.2.23, built by Kaio Da Mota and folded into this prototype) in a small window next to the record:
 
 1. The MID comes from the record, and the panel checks you're signed in to Awin (**Sign in to Awin** if not).
 2. It reads the **setup's own Chatter note** ("New Implementation setup for MID …"), which is its source of truth: the Platform Offer, the commission and the validation period as the setup set it. A post titled **Implementation Checklist** fills what the note doesn't say (the contract's publisher approval; otherwise approval is manual, as the setup sets it). The tracking fee is optional. Anything missing gets a small form.
@@ -167,7 +169,7 @@ So **Fill & save after a scan replaces the scan's values for the last three.** T
 ## What you need
 
 - **Microsoft Edge or Google Chrome** installed on your computer.
-- To be **signed in to both Salesforce and Microsoft 365** in the same browser.
+- To be **signed in to Salesforce and Microsoft 365** in the same browser, and **to the Awin UI** (ui.awin.com) for the setup and the review.
 - **For scans: access to the shared Moonpull results folder.** Please contact Rodier or Thomas on Teams to request access to the Moonpull batch results folder. This is where the scan results are saved. The Technical Checklist needs no extra access.
 
 ---
@@ -181,18 +183,18 @@ Moonfill is not in the browser store yet, so it is installed from the folder you
 2. Open `edge://extensions`.
 3. Turn on **Developer mode** (bottom left).
 4. Click **Load unpacked** and select the Moonfill folder (the one containing `manifest.json`).
-5. Click the puzzle icon in the toolbar and pin 🌙 Moonfill.
+5. Click the puzzle icon in the toolbar and pin the extension (**UI_AutoSetup_Prototype**).
 
 **Google Chrome**
 1. Unzip the folder somewhere permanent.
 2. Open `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and select the Moonfill folder.
-5. Pin 🌙 Moonfill from the puzzle icon.
+5. Pin the extension (**UI_AutoSetup_Prototype**) from the puzzle icon.
 
-**Already using an earlier Moonfill, or the separate SalesforceAutofill extension?** Let any running scans finish, then remove the old extensions before loading this one, so two copies don't run on the same page. Scan history from the old Moonfill doesn't carry over.
+**Already using Moonfill, the team release (Moonfill x SF_autofill), the separate SalesforceAutofill or Optimus Internal Review?** Let any running scans finish, then turn the others off or remove them before loading this one, so two copies don't run on the same page. Scan history from the old Moonfill doesn't carry over.
 
-**To update:** replace the files in the folder with the new ones, open the extensions page again and click the **reload** icon on the Moonfill card.
+**To update:** replace the files in the folder with the new ones, open the extensions page again, click the **reload** icon on the extension's card, then refresh your Salesforce tabs.
 
 ---
 
@@ -271,9 +273,20 @@ Record page buttons: colours and spacing are in the `injectStyles` block of `sal
 
 ---
 
+## Who built it
+
+| Tool | Built by | Code here | Its own repository |
+|---|---|---|---|
+| Moonfill (Moonpull scans) | **Rodier Sangibala** | `manifest.json`, `background.js`, `content.js`, `salesforce.js`, `popup.*` | [OptimusRodier/moonfill](https://github.com/OptimusRodier/moonfill) |
+| Checklist Autofill (SalesforceAutofill) | **Oscar Coleman** | `autofill/` | |
+| AutoSetup (New Implementation setup) | **Oscar Coleman** | `autofill/setup/` | this repository |
+| Internal Review (Optimus IR) | **Kaio Da Mota** | `autofill/review/` | `optimus-internal-review-checker` |
+
+The combined extension, and the work that makes the four tools fit together (the floating button, the shared sign-in check and edit lock, the review reading the setup's note), are by Oscar Coleman.
+
 ## Support
 
-Scans built by Rodier for Awin agents. The Technical Checklist comes from SalesforceAutofill. Questions, bugs and ideas: [GitHub Issues](https://github.com/OptimusRodier/moonfill) or contact the project owner.
+Questions, bugs and ideas: contact the tool's author above, or the project owner (Oscar Coleman). For Moonfill itself: [GitHub Issues](https://github.com/OptimusRodier/moonfill).
 
 ## What's new
 
