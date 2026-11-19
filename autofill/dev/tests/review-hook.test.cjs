@@ -186,3 +186,70 @@ test("IR hook: the MID from a dashboard link not on screen; MID 0 is never used"
   p.click();
   assert.equal(p.sent[1].mid, "");
 });
+
+// ---------- one settings page for the four tools ----------
+async function settingsPage(local = {}, sync = {}) {
+  const store = { sync: { ...sync }, local: { ...local } };
+  const area = (name) => ({
+    get: async (k) => (k === null ? JSON.parse(JSON.stringify(store[name])) : typeof k === "string" ? (k in store[name] ? { [k]: JSON.parse(JSON.stringify(store[name][k])) } : {}) : {}),
+    set: async (o) => { Object.assign(store[name], JSON.parse(JSON.stringify(o))); },
+    remove: async (k) => { [].concat(k).forEach((x) => delete store[name][x]); }
+  });
+  const chrome = {
+    storage: { sync: area("sync"), local: area("local"), onChanged: { addListener: () => {} } },
+    permissions: { contains: async () => false, request: async () => true, remove: async () => true },
+    runtime: { getURL: (p) => "chrome-extension://x/" + p }
+  };
+  const dom = await JSDOM.fromFile(path.join(root, "autofill/options.html"), {
+    runScripts: "dangerously", resources: "usable", pretendToBeVisual: true,
+    beforeParse(window) { window.chrome = chrome; }
+  });
+  await new Promise((r) => dom.window.addEventListener("load", r));
+  await sleep(50);
+  return { w: dom.window, d: dom.window.document, store };
+}
+
+test("settings: one page, Shared first, then one block per tool with who built it", async () => {
+  const { w, d } = await settingsPage();
+  assert.deepEqual(Array.from(d.querySelectorAll("section.tool")).map((s) => s.id), ["shared", "moonfill", "checklist", "setup", "review"]);
+  assert.deepEqual(Array.from(d.querySelectorAll("nav.jump a")).map((a) => a.getAttribute("href")), ["#shared", "#moonfill", "#checklist", "#setup", "#review"]);
+  const by = (id) => d.querySelector(`#${id} .by`).textContent;
+  assert.match(by("moonfill"), /Rodier Sangibala/);
+  assert.match(by("checklist"), /Oscar Coleman/);
+  assert.match(by("setup"), /Oscar Coleman/);
+  assert.match(by("review"), /Kaio Da Mota/);
+  assert.ok(d.querySelector("#shared input[name=menu-style]") && d.querySelector("#shared #detect-toggle") && d.querySelector("#shared #date-format"), "the shared settings are in Shared");
+  assert.equal(d.querySelectorAll("#checklist #fields tr").length, 45);
+  assert.match(d.querySelector("#moonfill").textContent, /No settings of its own/);
+  assert.match(d.querySelector("#setup").textContent, /No settings of its own/);
+  w.close();
+});
+
+test("settings: the shared date format is saved at once, for the checklist and the review", async () => {
+  const { w, d, store } = await settingsPage();
+  const sel = d.getElementById("date-format");
+  sel.value = "MM/DD/YYYY";
+  sel.dispatchEvent(new w.Event("change"));
+  await sleep(50);
+  assert.equal(store.sync.tcaSettings.dateFormat, "MM/DD/YYYY");
+  assert.equal(store.local.oirDateFormat, "MM/DD/YYYY");
+  assert.match(d.getElementById("date-status").textContent, /Saved: MM\/DD\/YYYY/);
+  w.close();
+});
+
+test("settings: the review's region paths and history, in its own block", async () => {
+  const { w, d, store } = await settingsPage({ oirRegionLoc: { UK: "gb" }, oirRun_a: { state: "done" }, oirRun_b: { state: "running" }, other: 1 });
+  assert.match(d.getElementById("oir-locs").textContent, /UK.*gb/);
+  d.getElementById("oir-region").value = "Germany"; d.getElementById("oir-loc").value = "de";
+  d.getElementById("oir-add").click();
+  await sleep(50);
+  assert.deepEqual(store.local.oirRegionLoc, { UK: "gb", Germany: "de" });
+  d.querySelector("#oir-locs button").click();
+  await sleep(50);
+  assert.deepEqual(store.local.oirRegionLoc, { Germany: "de" });
+  d.getElementById("oir-clear").click();
+  await sleep(50);
+  assert.ok(!("oirRun_a" in store.local) && "oirRun_b" in store.local && store.local.other === 1, "finished reviews removed, a running one and other data kept");
+  assert.match(d.getElementById("oir-cleared").textContent, /1 review\(s\) removed/);
+  w.close();
+});

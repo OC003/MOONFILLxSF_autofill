@@ -247,11 +247,12 @@ test('settings page: lists all 45 fields, shows saved choices, saves only change
   assert.match(doc.getElementById('status').textContent, /Saved\. 3 change/);
   assert.deepEqual(JSON.parse(JSON.stringify(chrome.store.tcaSettings)), {dateFormat: 'MM/DD/YYYY', fields: {'Server to server': {mode: 'skip'}, 'Tech notes': {mode: 'value', value: 'Checked by me'}}});
 
+  // Reset is for the checklist fields only: the shared date format (and menu style) stay
   doc.getElementById('reset').click();
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(JSON.parse(JSON.stringify(chrome.store.tcaSettings)), {});
+  assert.deepEqual(JSON.parse(JSON.stringify(chrome.store.tcaSettings)), {dateFormat: 'MM/DD/YYYY'});
   assert.equal(rowFor('Server to server').querySelector('.mode').value, '');
-  assert.equal(doc.getElementById('date-format').value, 'DD/MM/YYYY');
+  assert.equal(doc.getElementById('date-format').value, 'MM/DD/YYYY');
 });
 
 for (const mock of Object.keys(MOCKS)) {

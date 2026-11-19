@@ -344,7 +344,7 @@ async function renderRuns() {
 document.addEventListener("DOMContentLoaded", () => {
   const m = chrome.runtime.getManifest();
   document.getElementById("v").textContent = `v${OIR_VERSION} · ${m.version_name || m.version}`;
-  document.getElementById("opts").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("autofill/review/options.html") }));
+  document.getElementById("opts").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("autofill/options.html#review") }));
   document.getElementById("historyBtn").addEventListener("click", () => { view = view === "history" ? "scans" : "history"; renderRuns(); });
   renderStart();
   renderRuns();

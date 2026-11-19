@@ -24,7 +24,7 @@ This is the **prototype**: AutoSetup and the Internal Review are being tested he
 - **Always visible.** The Moonfill icon shows every scan; the checklist panel says exactly what it filled; the setup and the review show each page's progress and post a summary to Chatter.
 - **Safe by design.** Moonfill checks the result belongs to the MID you scanned. The checklist checks nothing else on the record changed before saving. The setup and the review check you're signed in to Awin and work on that one MID only, and the review deletes only that MID's test transactions. If a check fails, nothing is posted or saved.
 - **A safety net.** **Force paste** and **Copy result** for scans; **Fill only** for the checklist and the setup; **Retry failed pages** for the setup; **Retry Salesforce + Chatter** for the review.
-- **Your way.** In **Settings**, you can change what any checklist field is filled with, and choose the panel or a floating button.
+- **Your way.** One **Settings** page for all four tools: shared settings first (menu style, reading client websites, date format), then one block per tool.
 
 ---
 
@@ -88,7 +88,19 @@ Template values only fill **empty** fields, so an answer that's already there is
 - **Fill with…**, a value of your own
 - **Record creation date** or **Today's date**, for the two date fields only
 
-You can also allow or turn off platform detection, choose the date format (DD/MM/YYYY or MM/DD/YYYY) and reset everything to the team defaults. Your own choices win over templates. Settings are yours alone. They follow your Edge or Chrome profile and take effect on your next click. You can also open them from the extensions page: Moonfill → **Details** → **Extension options**.
+These are in the **📋 Checklist Autofill** block of the Settings page, with **Save** and **Reset fields to team defaults** in the bar at the bottom. Your own choices win over templates.
+
+**One Settings page for all four tools.** It opens from the panel's **Settings**, the review window's **Settings**, or the extensions page (the extension → **Details** → **Extension options**). It's split into clearly marked blocks:
+
+| Block | Settings |
+|---|---|
+| **Shared** | **Menu style** (panel or floating button); **Reading client websites** (one permission, used by the checklist's platform detection, the setup's Shopify address and Access query string, and the review's platform check); **Date format in Salesforce** (DD/MM/YYYY or MM/DD/YYYY, for the checklist's and the review's dates) |
+| **🌙 Moonfill** | none of its own (scans and their history are in the toolbar icon) |
+| **📋 Checklist Autofill** | what each of the 45 checklist fields is filled with |
+| **🚀 AutoSetup** | none of its own (it uses Reading client websites) |
+| **🔎 Internal Review** | Region → page path (`{loc}`) pairs; clear the review history |
+
+Settings are yours alone. They follow your Edge or Chrome profile and take effect on your next click.
 
 ### New Implementation setup
 
@@ -134,7 +146,7 @@ Validation period: 30 days
 Pages: 8 saved, 2 skipped.
 SingleView Setup: MasterTag Enabled, New.
 
-Posted by UI_AutoSetup_Prototype v3.0.6 AutoSetup prototype.
+Posted by UI_AutoSetup_Prototype v3.0.7 AutoSetup prototype.
 ```
 
 While the setup runs, the **Awin logo** at the front of the progress bar is a little pixel fire, flickering in the logo's own shape and colours. It stands still when the run ends.
@@ -148,7 +160,7 @@ While the setup runs, the **Awin logo** at the front of the progress bar is a li
 3. **Run Internal Review** reads 11 Awin UI pages in a collapsed **IR <MID>** tab group (each tab closes as soon as it's done), all at once where it can, runs the checks and fixes what it may: dedup pair in the query string append, awc, accepted domains (Shopify's myshopify domain too), SingleView, mobile tracking, test publishers 111 and 45628, validation period and manual approval. Each fix is saved and read back.
 4. It deletes the programme's test transactions, fills blank record fields (voucher tracking, custom parameters, eCommerce platform, dedup parameter and channel, Link Builder, MT plugins activated, Successful Tracking Test), and posts a short report to Chatter that @mentions the integrator. The Tech sign-off stays with them.
 
-Shift-click 🔎 IR, or **Just open the IR tabs** in the panel, to only open the 11 IR pages as before. Its settings (date format, region paths, history) are linked from Settings. Full detail: [`autofill/review/README.md`](autofill/review/README.md).
+Shift-click 🔎 IR, or **Just open the IR tabs** in the panel, to only open the 11 IR pages as before. Its settings (region paths, history) are in its own block on the Settings page; its date format and site check are the shared ones. Full detail: [`autofill/review/README.md`](autofill/review/README.md).
 
 ### Fields filled by both
 
@@ -282,7 +294,9 @@ Record page buttons: colours and spacing are in the `injectStyles` block of `sal
 | AutoSetup (New Implementation setup) | **Oscar Coleman** | `autofill/setup/` | this repository |
 | Internal Review (Optimus IR) | **Kaio Da Mota** | `autofill/review/` | `optimus-internal-review-checker` |
 
-The combined extension, and the work that makes the four tools fit together (the floating button, the shared sign-in check and edit lock, the review reading the setup's note), are by Oscar Coleman.
+The combined extension, and the work that makes the four tools fit together (the floating button, the shared sign-in check and edit lock, the review reading the setup's note, the one settings page), are by Oscar Coleman.
+
+**Original processes from Awin Helper.** The New Implementation and Internal Review processes, the Awin UI pages each one works through, come from the **Awin Helper** plugin by **Andrew**. Moonfill's 🚀 and 🔎 tab groups open those page lists, and AutoSetup and the Internal Review build on those processes to fill and check the pages. Credit to Andrew for them.
 
 ## Support
 
@@ -295,6 +309,7 @@ Questions, bugs and ideas: contact the tool's author above, or the project owner
 - The review's Salesforce update shares the record's edit lock with Moonfill and the checklist.
 - **The review checks against the setup's Chatter note** (the source of truth), keeps the setup's query string and the myshopify website of Shopify stores, and reads pre-join publishers, mobile tracking, Link Builder and approval the way the setup does.
 - **0 days of validation in the contract is set as −1** (not Access), by the setup and the review.
+- **One Settings page for all four tools:** Shared settings, then a block for each tool (the review's own settings page is gone).
 
 **Technical Checklist (added November 2026)**
 - One-click fill and save of the Technical Checklist (30 fields), with **Check page** and **Fill only**.

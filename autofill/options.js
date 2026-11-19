@@ -1,4 +1,8 @@
-// Settings page: one row per field (team default + the user's choice), plus the date format.
+// The settings page for the four tools (Shared, Moonfill, Checklist Autofill, AutoSetup, Internal Review).
+// This script runs the shared settings and the checklist's: one row per field (team default + the user's
+// choice). The Internal Review's block is run by review/options-section.js.
+// The date format is shared: saved at once, for the checklist (tcaSettings.dateFormat) and the review
+// (oirDateFormat). The bar's Save and Reset are for the checklist fields only.
 (function () {
   const fields = globalThis.TCA_FIELDS;
   const cfg = globalThis.TCA_CONFIG;
@@ -80,6 +84,7 @@
     try {
       const settings = read();
       await S.save(settings);
+      await reviewDate($('date-format').value);
       const n = Object.keys(settings.fields).length + (settings.dateFormat ? 1 : 0);
       status(n ? `Saved. ${n} change(s) from the team defaults.` : 'Saved. Using the team defaults.', 'ok');
     } catch (error) {
@@ -87,10 +92,17 @@
     }
   }
 
+  // only the checklist's fields: the shared menu style and date format stay as they are
   async function reset() {
-    show({});
+    const kept = await S.load();
+    show({ menuStyle: kept.menuStyle, dateFormat: kept.dateFormat });
     await save();
   }
+
+  // the shared date format, for the Internal Review too (it reads oirDateFormat)
+  const reviewDate = format => {
+    try { return chrome.storage.local.set({ oirDateFormat: format }); } catch { return Promise.resolve(); }
+  };
 
   // Platform detection: the optional "read websites" permission, granted or removed here. request()
   // must run straight from the click (no await before it), or the browser refuses to ask.
@@ -101,8 +113,8 @@
     const button = $('detect-toggle');
     if (!p) { $('detect-status').textContent = 'Not available on this page.'; button.hidden = true; return; }
     const on = await p.contains(SITES);
-    $('detect-status').textContent = on ? 'Allowed: Auto-detect reads the client\'s site when you click Fill.' : 'Not allowed yet: the default fill is used.';
-    button.textContent = on ? 'Turn off' : 'Allow platform detection';
+    $('detect-status').textContent = on ? 'Allowed: the tools above may read the client\'s site.' : 'Not allowed yet: the checklist uses its default fill, the setup the Landing Page URL and source=aw, and the review skips the platform check.';
+    button.textContent = on ? 'Turn off' : 'Allow reading client websites';
     button.dataset.on = String(on);
     button.hidden = false;
   }
@@ -114,7 +126,20 @@
   showDetection();
 
   for (const format of S.DATE_FORMATS) $('date-format').append(new Option(format, format));
-  $('date-format').addEventListener('change', () => status(''));
+  $('date-format').addEventListener('change', async () => {
+    status('');
+    try {
+      const format = $('date-format').value;
+      const saved = await S.load();
+      const next = { ...saved };
+      if (format !== cfg.dateFormat) next.dateFormat = format; else delete next.dateFormat;
+      await S.save(next);
+      await reviewDate(format);
+      $('date-status').textContent = `Saved: ${format}.`;
+    } catch (error) {
+      $('date-status').textContent = error.message;
+    }
+  });
   $('fields').append(...fields.map(row));
   // The menu style is saved as soon as it's picked, on top of whatever is saved already.
   for (const radio of document.querySelectorAll('input[name="menu-style"]')) {
