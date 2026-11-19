@@ -831,7 +831,7 @@ test('menu style: the floating button can be dragged anywhere; its place is reme
   const window = await open('lightning', 'success', undefined, chrome);
   const ui = panel(window);
   const orb = ui.querySelector('.orb');
-  assert.equal(orb.style.left, `${window.innerWidth - 44 - 8}px`, 'starts at the bottom right, where the panel sits');
+  assert.equal(orb.style.left, `${window.innerWidth - 52 - 8}px`, 'starts at the bottom right, where the panel sits');
   const x = parseFloat(orb.style.left) + 10;
   const y = parseFloat(orb.style.top) + 10;
   pointer(window, orb, 'pointerdown', x, y);
@@ -846,7 +846,7 @@ test('menu style: the floating button can be dragged anywhere; its place is reme
   pointer(window, orb, 'pointermove', -500, 5000);
   pointer(window, orb, 'pointerup', -500, 5000);
   assert.equal(orb.style.left, '8px', 'kept on screen');
-  assert.equal(orb.style.top, `${window.innerHeight - 44 - 8}px`);
+  assert.equal(orb.style.top, `${window.innerHeight - 52 - 8}px`);
 });
 
 test('settings: the menu style is kept only when it is "orb" (the panel is the default)', async () => {
@@ -868,4 +868,20 @@ test('settings page: the menu style is saved as soon as it is picked, keeping th
   assert.equal(chrome.store.tcaSettings.menuStyle, 'orb');
   assert.deepEqual(plain(chrome.store.tcaSettings.fields), {'Server to server': {mode: 'skip'}});
   assert.match(window.document.getElementById('style-status').textContent, /floating button/);
+});
+
+test('menu style: with the floating button, Moonfill\'s own row of buttons is moved out of sight (still there for the menu), and back with the panel', async () => {
+  const chrome = orbChrome();
+  const window = await open('lightning', 'success', undefined, chrome);
+  const hiding = () => window.document.getElementById('tca-orb-hides-row');
+  assert.ok(hiding(), 'hidden while the floating button is used');
+  assert.match(hiding().textContent, /#moonfillSalesforceSection, #moonfillCaseSection \{ position: fixed !important; left: -10000px/);
+  assert.doesNotMatch(hiding().textContent, /display: none/, 'never display:none: Moonfill would redraw a row with no size');
+  assert.ok(window.document.querySelector('#moonfillSalesforceSection button.mf-impl'), 'the row is still on the page');
+  panel(window).querySelector('.impl').click();
+  assert.equal(window.moonfillNIClicks, 1, 'and the menu still presses its 🚀');
+  await chrome.storage.sync.set({tcaSettings: {}});   // back to the panel in Settings
+  await pause(30);
+  assert.equal(hiding(), null, 'shown again with the panel');
+  assert.equal(panel(window).querySelector('.orb').hidden, true);
 });

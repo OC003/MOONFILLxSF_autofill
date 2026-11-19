@@ -35,7 +35,7 @@
   if ((!isMock && !isSalesforce) || document.getElementById('tca-root')) return;
 
   const state = { running: false, ready: false, onRecord: false, expanded: isMock, status: '', message: '', report: '', template: 'auto', style: 'panel' };
-  const ORB = 44;    // the floating button's size
+  const ORB = 52;    // the floating button's size
   const EDGE = 8;    // and how close it may get to the window's edge
 
   const host = document.createElement('div');
@@ -71,7 +71,7 @@
   .orb { position: fixed; z-index: 2147483000; width: ${ORB}px; height: ${ORB}px; padding: 0; border: 2px solid #fff; border-radius: 50%;
     background: #0176d3; color: #fff; display: grid; place-items: center; cursor: grab; touch-action: none;
     box-shadow: 0 4px 16px rgba(0,0,0,.18), 0 1px 3px rgba(0,0,0,.2); transition: transform .15s ease, background .15s ease; }
-  .orb svg { width: 22px; height: 22px; }
+  .orb svg { width: 26px; height: 26px; }
   .orb::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid rgba(1,118,211,.25); pointer-events: none; }
   .orb .dot { position: absolute; right: -1px; top: -1px; width: 10px; height: 10px; border: 2px solid #fff; box-sizing: content-box; }
   .orb.ready .dot { background: #2e844a; }
@@ -127,8 +127,23 @@
   // Details tab and draws the checklist itself (it needn't have been scrolled to first).
   const canFill = () => state.ready || state.onRecord;
 
+  // With the floating button, Moonfill's own row of buttons on the record (🌙 / 🔎 / 🚀, and 🔎 on a
+  // Case) repeats what its menu offers, so it's moved out of sight. Not removed: Moonfill redraws a row
+  // that has no size, and the menu still presses these buttons.
+  const HIDE_ROW = 'tca-orb-hides-row';
+  function hideMoonfillRow(on) {
+    const old = document.getElementById(HIDE_ROW);
+    if (!on) { if (old) old.remove(); return; }
+    if (old) return;
+    const style = document.createElement('style');
+    style.id = HIDE_ROW;
+    style.textContent = '#moonfillSalesforceSection, #moonfillCaseSection { position: fixed !important; left: -10000px !important; top: 0 !important; width: 1px !important; height: 1px !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; }';
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function paint() {
     const wrap = $('.wrap');
+    hideMoonfillRow(orbMode());
     wrap.classList.toggle('orb-mode', orbMode());
     wrap.classList.toggle('running', state.running);
     $('.orb').hidden = !orbMode();

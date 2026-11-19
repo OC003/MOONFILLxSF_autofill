@@ -50,7 +50,7 @@ The **History** button lists your latest scans with program, MID and status.
 
 Open an Implementation record. The **Checklist Autofill** panel at the bottom right shows a green dot when it can see the Technical Checklist. You don't have to scroll down to the checklist first: Salesforce only draws a section once it has been on screen, so **Fill** opens the **Details** tab, brings the checklist up itself (switching the form to edit mode if that's what it takes) and then fills it. If Moonfill is filling the scan fields on the same record at that moment, the fill waits for it to finish.
 
-**Menu style.** In **Settings → Menu style** you can swap the panel for a **floating button**: a round blue button you can drag anywhere on the page (it stays where you put it, in every Salesforce tab). Hover it for its menu, or click it to keep the menu open. The menu has the same controls as the panel, plus **🌙 Scan**, **🔎 IR** and **🚀 Setup**, which start those processes just like Moonfill's buttons on the record.
+**Menu style.** In **Settings → Menu style** you can swap the panel for a **floating button**: a round blue button you can drag anywhere on the page (it stays where you put it, in every Salesforce tab). Hover it for its menu, or click it to keep the menu open. The menu has the same controls as the panel, plus **🌙 Scan**, **🔎 IR** and **🚀 Setup**, which start those processes just like Moonfill's buttons on the record. With the floating button, that row of buttons at the top of the record is hidden, since the menu has the same three.
 
 | Button | What it does |
 |---|---|
@@ -130,7 +130,7 @@ Validation period: 30 days
 Pages: 8 saved, 2 skipped.
 SingleView Setup: MasterTag Enabled, New.
 
-Posted by UI_AutoSetup_Prototype v3.0.2 AutoSetup prototype.
+Posted by UI_AutoSetup_Prototype v3.0.3 AutoSetup prototype.
 ```
 
 While the setup runs, the **Awin logo** at the front of the progress bar is a little pixel fire, flickering in the logo's own shape and colours. It stands still when the run ends.
