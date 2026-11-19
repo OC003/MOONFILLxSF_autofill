@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "UI_AutoSetup_Prototype",
-  "version": "3.0.3",
-  "version_name": "3.0.3 AutoSetup prototype",
-  "description": "Run Moonpull scans from Salesforce in one click, and fill in and save the Technical Checklist in one click.",
+  "version": "3.0.4",
+  "version_name": "3.0.4 AutoSetup prototype",
+  "description": "Run Moonpull scans from Salesforce in one click, fill in and save the Technical Checklist, set up a new programme in the Awin UI and run its Internal Review.",
   "permissions": ["tabs", "storage", "activeTab", "scripting", "webRequest", "alarms", "notifications", "tabGroups"],
   "host_permissions": [
     "https://forms.office.com/*",
@@ -45,6 +45,11 @@
     {
       "matches": ["https://ui.awin.com/*"],
       "js": ["autofill/config.js", "autofill/engine.js", "autofill/setup/fill.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://awin.lightning.force.com/*"],
+      "js": ["autofill/review/lib/log.js", "autofill/review/lib/fields.js", "autofill/review/lib/checks.js", "autofill/review/content/salesforce.js", "autofill/review/content/hook.js"],
       "run_at": "document_idle"
     }
   ],

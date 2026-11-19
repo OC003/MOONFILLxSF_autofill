@@ -1383,3 +1383,35 @@ test('form: the Chatter summary puts the commission group and validation period 
   assert.match(text, /\nValidation period: 45 days \(already set, kept\)\n/);
   access.window.close();
 });
+
+// ---------- 0 days in the contract (the user's rule, 2026-11-19) and the Internal Review reading the note ----------
+
+test('advertiser settings, not Access: 0 days in the contract is set as -1 (as the Internal Review expects)', async () => {
+  const zero = {...VALUES, platformOffer: 'Advanced', approval: 'Manual Approval', validationDays: '0'};
+  const w = advertiserPage('');
+  const result = await fill(w, zero);
+  assert.equal(result.status, 'filled', result.message);
+  assert.equal(w.document.getElementById('d1').value, '-1');
+  assert.equal((await w.TCASetupFill.verifyPage(zero)).status, 'saved');
+});
+
+test('form: the Chatter note is what the Internal Review reads as its source of truth', async () => {
+  const {createRequire} = await import('node:module');
+  const require = createRequire(import.meta.url);
+  require('../../review/lib/fields.js');
+  const C = require('../../review/lib/checks.js');
+  const {window, posts} = await chatterRun({scenario: 'advanced+zero-days', updates: [
+    {index: 2, status: 'saved', message: 'Saved and checked.'},
+    {index: 6, status: 'failed', message: 'x'},
+    {index: 8, status: 'saved', message: 'Saved and checked.'}
+  ]});
+  const text = posts()[0].text;
+  assert.match(text, /\nValidation period: -1 \(0 days in the contract\)\n/);
+  const note = C.parseSetupNote(text);
+  assert.deepEqual(note.inputs, {setupNote: true, offerOverride: 'Advanced', commissionType: 'Percentage', commissionValue: '5',
+    validationTarget: -1, validationDays: 0, setupNeedsLook: ['Fee manager'],
+    setupNotStarted: ['Tracking settings', 'Invite user', 'Plugin store', 'Tracking tag settings', 'Account details', 'Mobile tracking', 'Pre-join publishers']});
+  assert.equal(note.mid, '123456');
+  assert.deepEqual(C.missingInputs(note.inputs), [], 'the note alone is enough to start a review');
+  window.close();
+});

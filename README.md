@@ -8,6 +8,8 @@ Moonfill is a browser extension for Awin agents. Before, you had to fill in the 
 |---|---|---|
 | **Moonpull scan** | Submits the Moonpull form for the record, waits for the result, posts it to Chatter and fills the scan fields | **🌙 Submit Moonpull form** button on the record |
 | **Technical Checklist** | Fills the agreed values into the Technical Checklist and saves the record | **Checklist Autofill** panel, bottom right of the record |
+| **New Implementation setup** | Fills and saves the ten Awin UI setup pages from the record | **🚀 New Implementation** |
+| **Internal Review** (Optimus IR) | Checks and fixes the Awin UI, deletes the test transactions, updates the record and reports to Chatter | **🔎 IR** on an Implementation record |
 
 ---
 
@@ -97,7 +99,7 @@ Clicking **🚀 New Implementation** on a record sets up the programme in Awin. 
 | Transaction Type, Commission Type | **Commission type** = Percentage → Sale + Percentage. Anything else: the commission group is left for you |
 | Publisher Commission | **Commission Amount** |
 | Approval of Publishers Joining | always **Manual Approval** |
-| Validation Period Days | **Auto validation period**. For Access, a value already on the page is kept; if it's empty or -1, it becomes the period + 7 |
+| Validation Period Days | **Auto validation period**. For Access, a value already on the page is kept; if it's empty or -1, it becomes the period + 7. Otherwise 0 days is set as -1 |
 
 Before anything starts, the box checks you're signed in to Awin (looking at the page Awin sends back, not just its address), and checks again when you click **Run and save** if the box has been open for more than a minute. If you're not signed in, it says so, with **Open Awin** and **Check again**. It also checks the record has everything listed above. If something is missing, it lists it, with **Enter the details by hand**, which opens a form filled in with whatever the record has. Without a Landing Page URL or Platform Offer, that form is the only way to run it.
 
@@ -130,10 +132,21 @@ Validation period: 30 days
 Pages: 8 saved, 2 skipped.
 SingleView Setup: MasterTag Enabled, New.
 
-Posted by UI_AutoSetup_Prototype v3.0.3 AutoSetup prototype.
+Posted by UI_AutoSetup_Prototype v3.0.4 AutoSetup prototype.
 ```
 
 While the setup runs, the **Awin logo** at the front of the progress bar is a little pixel fire, flickering in the logo's own shape and colours. It stands still when the run ends.
+
+### Internal Review
+
+**🔎 IR** on an Implementation record opens the **Internal Review** panel (Optimus IR v0.2.23, by its own author, folded into this prototype) in a small window next to the record:
+
+1. The MID comes from the record, and the panel checks you're signed in to Awin (**Sign in to Awin** if not).
+2. It reads the **setup's own Chatter note** ("New Implementation setup for MID …"), which is its source of truth: the Platform Offer, the commission and the validation period as the setup set it. A post titled **Implementation Checklist** fills what the note doesn't say (the contract's publisher approval; otherwise approval is manual, as the setup sets it). The tracking fee is optional. Anything missing gets a small form.
+3. **Run Internal Review** reads 11 Awin UI pages in a collapsed **IR <MID>** tab group, all at once where it can, runs the checks and fixes what it may: dedup pair in the query string append, awc, accepted domains (Shopify's myshopify domain too), SingleView, mobile tracking, test publishers 111 and 45628, validation period and manual approval. Each fix is saved and read back.
+4. It deletes the programme's test transactions, fills blank record fields (voucher tracking, custom parameters, eCommerce platform, dedup parameter and channel, Link Builder, MT plugins activated, Successful Tracking Test), and posts a short report to Chatter that @mentions the integrator. The Tech sign-off stays with them.
+
+Shift-click 🔎 IR, or **Just open the IR tabs** in the panel, to only open the 11 IR pages as before. Its settings (date format, region paths, history) are linked from Settings. Full detail: [`autofill/review/README.md`](autofill/review/README.md).
 
 ### Fields filled by both
 
@@ -250,6 +263,8 @@ When you report a problem, please send a screenshot of the Moonfill card or the 
 |---|---|
 | `manifest.json`, `background.js`, `content.js`, `salesforce.js`, `popup.*`, `css/`, `assets/` | Moonpull scans, the toolbar popup and the record buttons |
 | `autofill/` | The Technical Checklist: panel, fill/save engine, settings page. See [`autofill/README.md`](autofill/README.md) |
+| `autofill/setup/` | The New Implementation setup (🚀) |
+| `autofill/review/` | The Internal Review (🔎 IR, Optimus IR). See [`autofill/review/README.md`](autofill/review/README.md) |
 | `autofill/dev/` | Checklist field specification, mock record pages and tests (`cd autofill/dev && npm ci && npm test`) |
 
 Record page buttons: colours and spacing are in the `injectStyles` block of `salesforce.js`. The steps of each post attempt are logged in the service worker console ("Moonfill post steps").
@@ -261,6 +276,12 @@ Record page buttons: colours and spacing are in the `injectStyles` block of `sal
 Scans built by Rodier for Awin agents. The Technical Checklist comes from SalesforceAutofill. Questions, bugs and ideas: [GitHub Issues](https://github.com/OptimusRodier/moonfill) or contact the project owner.
 
 ## What's new
+
+**Internal Review (added 19 November 2026, prototype)**
+- **🔎 IR runs the Internal Review** (Optimus IR v0.2.23) from the record, in a small panel window: MID from the record, Awin sign-in checked for you, fixes made and read back, test transactions deleted, record updated, report posted to Chatter. Shift-click for just the tabs.
+- The review's Salesforce update shares the record's edit lock with Moonfill and the checklist.
+- **The review checks against the setup's Chatter note** (the source of truth), keeps the setup's query string and the myshopify website of Shopify stores, and reads pre-join publishers, mobile tracking, Link Builder and approval the way the setup does.
+- **0 days of validation in the contract is set as −1** (not Access), by the setup and the review.
 
 **Technical Checklist (added November 2026)**
 - One-click fill and save of the Technical Checklist (30 fields), with **Check page** and **Fill only**.

@@ -82,3 +82,10 @@ try {
   console.error('Moonfill programme setup failed to start', error);
 }
 
+// Internal Review (review/background.js): Optimus IR, run from the panel that Moonfill's 🔎 IR button opens.
+// Kept separate so a failure here can't affect the setup or the checklist.
+try {
+  if (typeof importScripts === 'function') importScripts('autofill/review/background.js');
+} catch (error) {
+  console.error('Internal Review failed to start', error);
+}

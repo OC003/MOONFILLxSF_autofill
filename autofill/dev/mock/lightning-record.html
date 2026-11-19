@@ -42,6 +42,7 @@
       <option value="lazy">Sections drawn only when scrolled to</option>
       <option value="lazy-edit">Sections drawn only in edit mode</option>
       <option value="advanced+sv-renamed">Advanced, SingleView section named differently</option>
+      <option value="advanced+zero-days">Advanced, 0 days auto validation period</option>
       <option value="related-tab">Related tab showing</option>
     </select>
   </label>
@@ -214,7 +215,7 @@
       h('div', { id: 'moonfillSalesforceSection' },
         h('a', { href: 'https://ui.awin.com/dashboard/awin/advertiser/123456', text: 'MID link (mock)' }),
         h('button', { type: 'button', class: 'mf-btn mf-impl', text: '🚀 New Implementation', onclick: () => { window.moonfillNIClicks = (window.moonfillNIClicks || 0) + 1; } })),
-      ...[['Commission type', has('fixed') ? 'Fixed' : 'Percentage'], ['Commission Amount', has('no-amount') ? '' : '5%'], ['Auto validation period', '30 days']].map(([label, text]) =>
+      ...[['Commission type', has('fixed') ? 'Fixed' : 'Percentage'], ['Commission Amount', has('no-amount') ? '' : '5%'], ['Auto validation period', has('zero-days') ? '0 days' : '30 days']].map(([label, text]) =>
         h('records-record-layout-item', { 'field-label': label },
           h('div', { class: 'slds-form-element slds-form-element_readonly' },
             h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: label })),

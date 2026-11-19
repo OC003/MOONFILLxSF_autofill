@@ -95,7 +95,7 @@
   <div class="body">
     <div class="start" hidden>
       <button class="act moon" type="button" title="Submit the Moonpull form for this record">🌙 Scan</button>
-      <button class="act ir" type="button" title="Open the Internal Review tabs">🔎 IR</button>
+      <button class="act ir" type="button" title="Run the Internal Review (checks and fixes the Awin UI, then reports to Chatter)">🔎 IR</button>
       <button class="act impl" type="button" title="Start the New Implementation setup">🚀 Setup</button>
     </div>
     <div class="row"><label>Template <select class="template">

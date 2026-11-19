@@ -496,7 +496,9 @@
   let pluginScope = null;   // the plugin menu, once open
 
   // Page 9's Validation Period Days: the record's period, plus 7 for Access (where it was empty).
-  const advertiserDays = v => String(v.platformOffer === 'Access' ? +v.validationDays + 7 : +v.validationDays);
+  // Access: the contract's days + 7. Otherwise the contract's days, except 0 days, which Awin takes as -1
+  // (the user's rule, 2026-11-19, the same as the Internal Review's).
+  const advertiserDays = v => String(v.platformOffer === 'Access' ? +v.validationDays + 7 : +v.validationDays === 0 ? -1 : +v.validationDays);
 
   // Page 1's fields: by id (from the page check), or by label if the id differs.
   const TRACKING = [

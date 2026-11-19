@@ -594,7 +594,9 @@
     const kept = r && /already set \(([^)]*)\)/i.exec(`${r.note || ''} ${r.message || ''}`);
     if (kept) return `${kept[1]} days (already set, kept)`;
     if (!/^\d+$/.test(String(v.validationDays))) return 'not set (Auto validation period is empty on the record)';
-    return outcome(ADVERTISER, v.platformOffer === 'Access' ? `${+v.validationDays + 7} days (${v.validationDays} + 7 for Access)` : `${v.validationDays} days`);
+    // The Internal Review reads these lines back (autofill/review/lib/checks.js parseSetupNote): keep the forms.
+    return outcome(ADVERTISER, v.platformOffer === 'Access' ? `${+v.validationDays + 7} days (${v.validationDays} + 7 for Access)`
+      : +v.validationDays === 0 ? '-1 (0 days in the contract)' : `${v.validationDays} days`);
   }
   function summaryText(update) {
     let tool = 'AutoSetup';
