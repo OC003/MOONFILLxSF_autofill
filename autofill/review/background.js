@@ -57,8 +57,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
       x.state = "failed"; x.error = msg; x.finishedAt = Date.now(); x.stalled = true;
       (x.steps || []).forEach((st) => { if (st.status === "running") { st.status = "fail"; st.detail = "no progress"; } });
     });
-    await runLog(r.id, "error", "watchdog", msg);
-    await closeGroup(r.id);
+    await runLog(r.id, "error", "watchdog", msg);   // its tabs stay in the group for a look
     notify("Optimus IR: review stopped", `MID ${r.awinId}: ${msg}`, r);
   }
 });
@@ -155,20 +154,46 @@ function addToGroup(id, mid, tabId) {
     if (r && r.groupId != null) {
       try { await chrome.tabs.group({ groupId: r.groupId, tabIds: [tabId] }); return; } catch (e) { /* group gone */ }
     }
+    // like the setup's "<MID> setup" group (AutoSetup prototype): named, open, the tabs kept for a look
     const groupId = await chrome.tabs.group({ tabIds: [tabId] });
-    await chrome.tabGroups.update(groupId, { title: `IR ${mid}`, color: "purple", collapsed: true });
+    await chrome.tabGroups.update(groupId, { title: `${mid} IR`, color: "orange", collapsed: false });
     await mutate(id, (x) => { x.groupId = groupId; });
   }).catch(() => {});
   groupChains[id] = next;
   return next;
 }
+// In the record's window (the panel is a window of its own, and tabs can't go there)
+async function recordWindow(run) {
+  const t = run.originTabId != null ? await chrome.tabs.get(run.originTabId).catch(() => null) : null;
+  return t ? t.windowId : undefined;
+}
 async function openBg(run, url) {
-  const tab = await chrome.tabs.create({ url, active: false });
+  const windowId = await recordWindow(run);
+  const tab = await chrome.tabs.create(windowId != null ? { url, active: false, windowId } : { url, active: false });
   await addToGroup(run.id, run.awinId, tab.id);
   await waitForLoad(tab.id);
   return tab;
 }
 const closeTab = async (tabId) => { try { await chrome.tabs.remove(tabId); } catch (e) { /* closed */ } };
+// One tab per Awin page, kept open in the group for the whole review (as the setup does): its read, its
+// fixes and its read-back all happen there. A tab that was closed, or went to another address, is
+// opened again / sent back to the page.
+const samePage = (a, b) => String(a || "").split("#")[0].replace(/\/+$/, "") === String(b || "").split("#")[0].replace(/\/+$/, "");
+async function pageTab(id, key, url) {
+  const run = await getRun(id);
+  const known = run && run.tabs && run.tabs[key];
+  const t = known != null ? await chrome.tabs.get(known).catch(() => null) : null;
+  if (t) {
+    if (url && !samePage(t.url, url)) { await chrome.tabs.update(t.id, { url }); await waitForLoad(t.id); }
+    return t;
+  }
+  const tab = await openBg(run, url);
+  await mutate(id, (r) => { r.tabs = Object.assign({}, r.tabs, { [key]: tab.id }); });
+  return tab;
+}
+const keepTab = (id, key, tabId) => mutate(id, (r) => { r.tabs = Object.assign({}, r.tabs, { [key]: tabId }); });
+// ✓ / ⚠ in the tab title, through the setup's own page script (setup/fill.js), as the setup marks its tabs
+const markTab = (tabId, symbol) => chrome.tabs.sendMessage(tabId, { action: "tcaSetupMark", symbol }).catch(() => {});
 async function closeGroup(id, keep) {
   const run = await getRun(id);
   if (!run || run.groupId == null) return;
@@ -206,7 +231,9 @@ async function awinOnce(tabId, method, args) {
 async function awin(tabId, method, ...args) {
   let last;
   for (let i = 1; i <= 3; i++) {
-    try { await waitForLoad(tabId); return await awinOnce(tabId, method, args); }
+    // the tab was already waited for when it opened: a short wait here, so a page that keeps "loading"
+    // can't use up the read's time limit before the page script even starts
+    try { await waitForLoad(tabId, 15000); return await awinOnce(tabId, method, args); }
     catch (e) {
       last = e;
       if (!PAGE_GONE.test(e.message)) break;
@@ -284,23 +311,26 @@ async function rememberLoc(region, loc) {
 }
 async function readMain(run) {
   const looksRight = (r) => r && r.ok && r.fields && (r.fields.append !== null || r.fields.website !== null);
+  let last = null;
   for (const loc of await locCandidates(run.sf.region)) {
     const url = pageDef("main").url(loc, run.awinId);
     const tab = await openBg(run, url);
-    const r = await scrapePage(tab.id, "main", run.awinId);
+    // the same tries as the other pages (2 × 45 s, the tab reloaded in between), not one 60 s go
+    const r = await readPage(run.id, pageDef("main"), tab.id, run.awinId);
     if (r && r.signin) return { loc, result: r, tabId: tab.id };
+    if (looksRight(r)) { await keepTab(run.id, "main", tab.id); return { loc, url: r.url || url, result: r, tabId: tab.id }; }
+    last = r;
     await closeTab(tab.id);
-    if (looksRight(r)) return { loc, url: r.url || url, result: r };
   }
   const tab = await openBg(run, `https://ui.awin.com/dashboard/awin/advertiser/${run.awinId}`);
   const href = await inPage(tab.id, () => (Array.from(document.querySelectorAll('a[href*="tracking-settings/"]'))[0] || {}).href || null).catch(() => null);
   await closeTab(tab.id);
   const loc = href && (/tracking-settings\/([^/]+)\/awin/.exec(href) || [])[1];
-  if (!loc) return { loc: null, result: { ok: false, error: "could not work out the region path ({loc})" } };
+  if (!loc) return { loc: null, result: last && !last.ok ? last : { ok: false, error: "could not work out the region path ({loc})" } };
   const t2 = await openBg(run, pageDef("main").url(loc, run.awinId));
-  const r = await scrapePage(t2.id, "main", run.awinId);
-  await closeTab(t2.id);
-  return { loc, url: r.url, result: r };
+  const r = await readPage(run.id, pageDef("main"), t2.id, run.awinId);
+  await keepTab(run.id, "main", t2.id);
+  return { loc, url: r.url, result: r, tabId: t2.id };
 }
 
 // ---------- advertiser site: eCommerce platform (lib/platforms.js) ----------
@@ -404,7 +434,6 @@ async function startRun(msg) {
   pipeline(id).finally(() => busy(false)).catch(async (e) => {
     await runLog(id, "error", "run", "stopped by an unexpected error:", e && e.stack ? e.stack : String(e));
     await mutate(id, (r) => { r.state = "failed"; r.error = e.message || String(e); r.finishedAt = Date.now(); });
-    await closeGroup(id);
   });
   return { ok: true, runId: id };
 }
@@ -464,9 +493,9 @@ async function pipeline(id) {
   async function readOne(p, loc) {
     const url = p.url(loc, run0.awinId);
     try {
-      const tab = await openBg(run0, url);
+      const tab = await pageTab(id, p.key, url);
       const r = await readPage(id, p, tab.id, run0.awinId);
-      if (r.signin) { signinLost = true; signinTabs.push(tab.id); } else await closeTab(tab.id);
+      if (r.signin) { signinLost = true; signinTabs.push(tab.id); }
       await mutate(id, (x) => { x.ui[p.key] = r; x.pages[p.key] = (r.url && p.key !== "testtx") ? r.url : url; });
       await logMissing(id, p.name, r);
       await stepEnd(id, "read:" + p.key, readStatus(r), readDetail(r));
@@ -570,7 +599,7 @@ async function pipeline(id) {
     fixPage("testtx", [readP.testtx, readP.validate, readP.wizard])
   ];
   await Promise.all([...Object.values(readP), siteP, ...fixes]);
-  await closeGroup(id, signinTabs[0]);
+  // the tabs stay open in the "<MID> IR" group, as the setup's do; the TC closes the group
   if (signinTabs.length) {
     await runLog(id, "error", "run", SIGNIN);
     notify("Optimus IR: sign-in needed", `MID ${run0.awinId}: ${SIGNIN}`, run0);
@@ -578,10 +607,17 @@ async function pipeline(id) {
   }
 
   // ---- checks again, on what the pages show now; then Salesforce + Chatter ----
-  await mutate(id, (r) => {
+  const checked = await mutate(id, (r) => {
     r.result = C.runChecks({ inputs: r.inputs, sf: r.sf, ui: r.ui, site: r.site, today: today() });
     r.state = "salesforce";
   });
+  // each page's tab: ✓ all right (or fixed), ⚠ not read, a fix that failed, or something to check
+  for (const [key, tabId] of Object.entries((checked && checked.tabs) || {})) {
+    const ui = checked.ui[key];
+    const failedFix = (checked.applied || []).some((a) => !a.verified && (checked.plan.changes.find((c) => c.id === a.id) || {}).pageKey === key);
+    const open = checked.result.checks.some((c) => c.pageKey === key && ["fail", "review", "skipped"].includes(c.result) && !/not required|filled by default/.test(c.note));
+    markTab(tabId, !ui || !ui.ok || failedFix || open ? "⚠" : "✓");
+  }
   await finishSalesforce(id);
 }
 
@@ -636,7 +672,7 @@ async function applyMainBatch(id, changes) {
   const url = run.pages.main || pageDef("main").url(run.loc || "us", run.awinId);
   const at = new Date().toISOString();
   const entries = changes.map((c) => ({ id: c.id, page: c.area, field: c.field, from: c.from, to: c.to, at, verified: false }));
-  const tab = await openBg(run, url);
+  const tab = await pageTab(id, "main", url);
   const log = (level, ...m) => runLog(id, level, "Main settings", ...m);
   // one short call into the page; a reload in between is waited for, not an error
   const call = async (method, ...args) => {
@@ -731,16 +767,14 @@ async function applyMainBatch(id, changes) {
       }
     });
     return entries;
-  } finally {
-    await closeTab(tab.id);
-  }
+  } finally { /* the tab stays in the group */ }
 }
 
 async function applyOne(id, change) {
   const run = await getRun(id);
   const url = run.pages[change.pageKey] || pageDef(change.pageKey).url(run.loc || "us", run.awinId);
   const entry = { id: change.id, page: change.area, field: change.field, from: change.from, to: change.to, at: new Date().toISOString(), verified: false };
-  const tab = await openBg(run, url);
+  const tab = await pageTab(id, change.pageKey, url);
   const attempts = change.pageKey === "prejoin" ? PREJOIN_ATTEMPTS : 1;
   try {
     for (let i = 1; i <= attempts; i++) {
@@ -777,9 +811,7 @@ async function applyOne(id, change) {
       entry.error = "saved, but the page shows another value after reloading";
     }
     return entry;
-  } finally {
-    await closeTab(tab.id);
-  }
+  } finally { /* the tab stays in the group */ }
 }
 
 // Deletes every test transaction of the MID: search (#merchantId), then one row ->
@@ -787,7 +819,7 @@ async function applyOne(id, change) {
 async function deleteTestTransactions(id, change) {
   const run = await getRun(id);
   const entry = { id: change.id, page: change.area, field: change.field, from: change.from, to: "", at: new Date().toISOString(), verified: false, refs: [] };
-  const tab = await openBg(run, pageDef("testtx").url());
+  const tab = await pageTab(id, "testtx", pageDef("testtx").url());
   try {
     for (let i = 1; i <= 5; i++) {
       const found = await testTxSearch(tab.id, run.awinId);
@@ -812,9 +844,7 @@ async function deleteTestTransactions(id, change) {
     else if (!entry.error) entry.error = after && after.ok ? `${after.fields.rows.length} row(s) still there after deleting` : (after && after.error) || "could not read the page again";
     if (!entry.refs.length && change.from) entry.refs = change.from.split(", ");
     return entry;
-  } finally {
-    await closeTab(tab.id);
-  }
+  } finally { /* the tab stays in the group */ }
 }
 
 // ---------- Salesforce fields + Chatter on the record tab ----------
@@ -916,8 +946,7 @@ async function describePages(id) {
     await closeTab(tab.id);
   }
   await mutate(id, (r) => { r.diagnostics = { at: new Date().toISOString(), version: VERSION, pages: out }; });
-  await closeGroup(id);
-  return { ok: true };
+  return { ok: true };   // its own tabs were closed one by one; the review's stay
 }
 
 async function prune() {

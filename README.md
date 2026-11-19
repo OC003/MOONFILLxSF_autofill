@@ -132,7 +132,7 @@ Validation period: 30 days
 Pages: 8 saved, 2 skipped.
 SingleView Setup: MasterTag Enabled, New.
 
-Posted by UI_AutoSetup_Prototype v3.0.4 AutoSetup prototype.
+Posted by UI_AutoSetup_Prototype v3.0.5 AutoSetup prototype.
 ```
 
 While the setup runs, the **Awin logo** at the front of the progress bar is a little pixel fire, flickering in the logo's own shape and colours. It stands still when the run ends.
@@ -143,7 +143,7 @@ While the setup runs, the **Awin logo** at the front of the progress bar is a li
 
 1. The MID comes from the record, and the panel checks you're signed in to Awin (**Sign in to Awin** if not).
 2. It reads the **setup's own Chatter note** ("New Implementation setup for MID …"), which is its source of truth: the Platform Offer, the commission and the validation period as the setup set it. A post titled **Implementation Checklist** fills what the note doesn't say (the contract's publisher approval; otherwise approval is manual, as the setup sets it). The tracking fee is optional. Anything missing gets a small form.
-3. **Run Internal Review** reads 11 Awin UI pages in a collapsed **IR <MID>** tab group, all at once where it can, runs the checks and fixes what it may: dedup pair in the query string append, awc, accepted domains (Shopify's myshopify domain too), SingleView, mobile tracking, test publishers 111 and 45628, validation period and manual approval. Each fix is saved and read back.
+3. **Run Internal Review** reads 11 Awin UI pages in a **<MID> IR** tab group (one tab per page, kept open and marked ✓ or ⚠ at the end, like the setup's), all at once where it can, runs the checks and fixes what it may: dedup pair in the query string append, awc, accepted domains (Shopify's myshopify domain too), SingleView, mobile tracking, test publishers 111 and 45628, validation period and manual approval. Each fix is saved and read back.
 4. It deletes the programme's test transactions, fills blank record fields (voucher tracking, custom parameters, eCommerce platform, dedup parameter and channel, Link Builder, MT plugins activated, Successful Tracking Test), and posts a short report to Chatter that @mentions the integrator. The Tech sign-off stays with them.
 
 Shift-click 🔎 IR, or **Just open the IR tabs** in the panel, to only open the 11 IR pages as before. Its settings (date format, region paths, history) are linked from Settings. Full detail: [`autofill/review/README.md`](autofill/review/README.md).

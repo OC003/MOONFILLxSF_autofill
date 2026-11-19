@@ -160,3 +160,29 @@ test("IR panel: inputs from the setup note (the source of truth), differences wi
   assert.equal(start.inputsSource, "setup note + checklist");
   assert.equal(start.inputs.validationTarget, 37);
 });
+
+test("IR panel: no MID from the click -> taken from the setup note, else the record's Awin Program ID", async () => {
+  // the record's Awin Program ID (the panel's record read answers 131530)
+  let p = panel("?tab=7", { signedIn: true });
+  await sleep(400);
+  assert.equal(p.d.querySelector('input[name="mid"]').value, "131530");
+  assert.match(p.d.getElementById("start").textContent, /From the record's Awin Program ID\./);
+  assert.ok(p.sent.some((m) => m.action === "tcaSetupCheckSession" && m.mid === "131530"), "the sign-in is checked for it");
+  assert.equal(p.d.querySelector('input[name="signedIn"]').checked, true);
+  assert.equal(p.d.querySelector("#start button.primary").disabled, false);
+  // the setup note's MID, as soon as the Chatter is read
+  p = panel("?tab=7", { signedIn: true }, { found: true, setupNote: { mid: "131530", offer: "Access", needsLook: [], notStarted: [] }, checklistPost: false,
+    inputs: { setupNote: true, offerOverride: "Access", commissionType: "Percentage", commissionValue: "8", validationTarget: 37, validationDays: 30 }, missing: [], differences: [] });
+  await sleep(400);
+  assert.match(p.d.getElementById("start").textContent, /From the setup note\./);
+});
+
+test("IR hook: the MID from a dashboard link not on screen; MID 0 is never used", () => {
+  const p = record(`https://awin.lightning.force.com/lightning/r/TSE__c/${REC}/view`);
+  p.w.eval("HTMLElement.prototype.getClientRects = function(){return []};"); // nothing drawn on screen
+  p.click();
+  assert.equal(p.sent[0].mid, "131530");
+  p.w.document.querySelector("a").setAttribute("href", "https://ui.awin.com/dashboard/awin/advertiser/0");
+  p.click();
+  assert.equal(p.sent[1].mid, "");
+});

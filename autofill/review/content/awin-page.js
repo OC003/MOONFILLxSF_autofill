@@ -33,14 +33,20 @@
     if (/login\.microsoftonline|id\.awin\.com|\/login|\/sso|signin/i.test(location.href)) return true;
     return Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
   }
+  // AutoSetup prototype: a page whose own sign of being drawn shows is ready even if the browser still
+  // says it's loading (Awin's pages can keep loading something for a long time), and a page without that
+  // sign is taken as it is after 12 s, once it has text and no spinner, instead of waiting the full 30 s
+  // (which, with the load wait, ran Main settings past its 60 s limit: "no answer after 60 s").
   async function pageReady(extraTest) {
-    await waitFor(() => document.readyState === "complete", 30000);
+    const drawn = () => { try { return !!(extraTest && extraTest()); } catch (e) { return false; } };
+    await waitFor(() => document.readyState === "complete" || drawn() || signinShown(), 30000);
+    const t0 = Date.now();
     await waitFor(() => {
       if (signinShown()) return true;
       // the page's own sign of being drawn is enough (grids keep "loading" overlays around)
-      if (extraTest && extraTest()) return true;
+      if (drawn()) return true;
       const spinning = Array.from(document.querySelectorAll('[class*="spinner" i], [class*="loading" i], [role="progressbar"]')).some(visible);
-      return txt(document.body).length > 150 && !spinning && !extraTest;
+      return txt(document.body).length > 150 && !spinning && (!extraTest || Date.now() - t0 > 12000);
     }, 30000, 400);
     await sleep(500);
   }
@@ -66,6 +72,10 @@
     const want = aliases.map(norm);
     let best = null;
     for (const el of scope.querySelectorAll(LABELISH)) {
+      // cheap first: a label is short (its rendered text is computed only for short elements; doing it for
+      // every div of a big page made a single read take tens of seconds)
+      const raw = el.textContent;
+      if (!raw || raw.length > 400 || !raw.trim()) continue;
       if (!visible(el)) continue;
       const t = norm(txt(el));
       if (!t || t.length > 90 || !want.includes(t)) continue;
@@ -528,7 +538,8 @@
   };
 
   const readyTest = {
-    main: () => findLabel(A.main.append) || findLabel(A.main.website),
+    // the ids the setup found on the live page first (the labels may not match word for word)
+    main: () => q(A.main.websiteId) || q((A.main.ids || {}).append || []) || findLabel(A.main.append) || findLabel(A.main.website),
     commission: () => agDefaultCommission() || tables().some((t) => t.rows.length),
     plugins: () => /plugin/i.test(txt(document.body)),
     fees: () => q(A.fees.value) || agTables().some((t) => t.rows.length) || Array.from(document.querySelectorAll("table")).some((t) => t.querySelector("td")) || /no fees/i.test(txt(document.body)),

@@ -8,11 +8,14 @@
   const RECORD = /\/lightning\/r\/TSE__c\/[a-zA-Z0-9]{15,18}\/view/;
   const visible = (el) => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
 
-  // The MID from the record's Awin dashboard link, as the setup reads it (the panel checks it again)
+  // The MID from the record's Awin dashboard link, as Moonfill and the setup read it: a visible link first,
+  // then one not on screen. The panel also takes it from the setup note or the record's Awin Program ID.
   function readMid() {
     const scope = document.querySelector('.oneContent.active') || document;
-    const link = Array.from(scope.querySelectorAll('a[href*="ui.awin.com/dashboard/awin/advertiser/"]')).find(visible);
-    return link ? ((link.getAttribute('href').match(/advertiser\/(\d+)/) || [])[1] || '') : '';
+    const links = Array.from(scope.querySelectorAll('a[href*="ui.awin.com/dashboard/awin/advertiser/"]'));
+    const link = links.find(visible) || links[0];
+    const mid = link ? ((link.getAttribute('href').match(/advertiser\/(\d+)/) || [])[1] || '') : '';
+    return mid === '0' ? '' : mid;
   }
 
   window.addEventListener('click', (event) => {

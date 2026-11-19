@@ -95,13 +95,14 @@ async function renderStart(opts = {}) {
   const midInput = h("input", { type: "text", name: "mid", class: "mid", inputmode: "numeric", autocomplete: "off", placeholder: "MID, e.g. 131913", value: PARAMS.get("mid") || draft.mid || "" });
   const signed = h("input", { type: "checkbox", name: "signedIn", checked: !!draft.signedIn });
   const session = h("div", { class: "muted" });
+  const midFrom = h("div", { class: "muted" }, PARAMS.get("mid") ? "From the record." : "");
   const clStatus = h("div", { class: "muted" });
   const clFields = h("div", {});
   const recStatus = h("div", { class: "muted" });
   const err = h("div", { class: "err" });
   const run = h("button", { type: "submit", class: "primary", disabled: true }, "Run Internal Review");
   const form = h("form", {}, title,
-    h("label", { class: "row" }, h("span", {}, "MID of the programme to review"), midInput),
+    h("label", { class: "row" }, h("span", {}, "MID of the programme to review"), midInput, midFrom),
     h("label", { class: "check" }, signed, h("span", {}, "I'm signed in to ui.awin.com in this browser")),
     session, clStatus, clFields, recStatus, err, run,
     h("button", { type: "button", class: "tabs-only", title: "What the 🔎 IR button used to do: the 11 Internal Review pages as a tab group, nothing filled or checked",
@@ -133,6 +134,17 @@ async function renderStart(opts = {}) {
     validate();
   }
   midInput.addEventListener("change", checkSession);
+  midInput.addEventListener("input", () => { midFrom.textContent = ""; });
+  // The MID, when the 🔎 click couldn't read it: from the setup note, then the record's Awin Program ID
+  // (MID 0 = the advertiser isn't created in Awin yet: never used)
+  function fillMid(mid, from) {
+    mid = String(mid || "").trim();
+    if (midInput.value.trim() || !/^\d{3,}$/.test(mid)) return;
+    midInput.value = mid;
+    midFrom.textContent = `From ${from}.`;
+    checkSession();
+    validate();
+  }
 
   const state = { checklist: null, record: null, missing: [], pre: {}, tabError: "" };
   const spin = (el, text) => { el.textContent = ""; el.append(h("span", { class: "spin" }), " " + text); };
@@ -210,6 +222,7 @@ async function renderStart(opts = {}) {
     return;
   }
   state.checklist = cl.checklist;
+  if (cl.checklist.setupNote) fillMid(cl.checklist.setupNote.mid, "the setup note");
   state.pre = cl.checklist.inputs || {};
   state.missing = cl.checklist.found ? cl.checklist.missing : C.missingInputs({});
   clStatus.textContent = "";
@@ -245,6 +258,7 @@ async function renderStart(opts = {}) {
     return;
   }
   state.record = rec;
+  fillMid(rec.sf.awinId, "the record's Awin Program ID");
   title.textContent = rec.sf.name || "Implementation record";
   recStatus.textContent = rec.sf.awinId ? `Record: Awin Program ID ${rec.sf.awinId}` : "Record read (no Awin Program ID on it)";
   validate();

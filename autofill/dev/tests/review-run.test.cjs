@@ -74,6 +74,7 @@ async function page(url, method, a) {
 
 // ---- fake chrome ----
 const store = {};
+const created = [], groupTitles = [], marks = [];
 const tabs = new Map();
 let nextTab = 1;
 const listeners = { msg: [], updated: [], alarm: [] };
@@ -91,17 +92,17 @@ const chrome = {
     remove: async (k) => { [].concat(k).forEach((x) => delete store[x]); }
   } },
   tabs: {
-    create: async ({ url }) => { const tab = { id: nextTab++, url, status: "complete", windowId: 1 }; tabs.set(tab.id, tab); return tab; },
+    create: async ({ url, windowId }) => { created.push({ url, windowId }); const tab = { id: nextTab++, url, status: "complete", windowId: windowId || 9 }; tabs.set(tab.id, tab); return tab; },
     get: async (id) => { if (!tabs.has(id)) throw new Error("No tab with id: " + id); return tabs.get(id); },
     remove: async (id) => { tabs.delete(id); },
     update: async (id) => tabs.get(id),
     reload: async (id) => { setTimeout(() => listeners.updated.slice().forEach((f) => f(id, { status: "loading" })), 20); },
     query: async () => [],
     group: async () => 1,
-    sendMessage: async (id, msg) => { await sleep(50); ev("SF " + msg.action); return msg.action === "oirSfUpdate" ? { ok: true, set: msg.updates.map((u) => u.field), same: [], notfound: [], problem: [] } : { ok: true, mentioned: true }; },
+    sendMessage: async (id, msg) => { if (msg.action === "tcaSetupMark") { marks.push([id, msg.symbol]); return { ok: true }; } await sleep(50); ev("SF " + msg.action); return msg.action === "oirSfUpdate" ? { ok: true, set: msg.updates.map((u) => u.field), same: [], notfound: [], problem: [] } : { ok: true, mentioned: true }; },
     onUpdated: { addListener: (f) => listeners.updated.push(f), removeListener: (f) => { const i = listeners.updated.indexOf(f); if (i >= 0) listeners.updated.splice(i, 1); } }
   },
-  tabGroups: { update: async () => {} },
+  tabGroups: { update: async (g, o) => { groupTitles.push(o); } },
   windows: { update: async () => {}, get: async () => null, create: async () => ({ id: 5 }), onFocusChanged: { addListener: () => {} }, onRemoved: { addListener: () => {} }, WINDOW_ID_NONE: -1 },
   scripting: {
     executeScript: async ({ target, files, func, args }) => {
@@ -148,7 +149,13 @@ const send = (msg) => new Promise((res) => { for (const f of listeners.msg) if (
     ["Shopify domain: " + (SLOW ? "*.myshopify.com after the wait" : "the internal domain"),
       (run.applied || []).some((a) => a.to === (SLOW ? "*.myshopify.com" : "breggz-dc0shy6m.myshopify.com") && a.verified), ""],
     ["all fixes verified", (run.applied || []).every((a) => a.verified), JSON.stringify((run.applied || []).filter((a) => !a.verified))],
-    ["Chatter posted", events.some(([, e]) => e === "SF oirPostChatter"), ""]
+    ["Chatter posted", events.some(([, e]) => e === "SF oirPostChatter"), ""],
+    // like the setup: one tab per Awin page, in the record's window, kept open in a "<MID> IR" group, marked
+    ["tabs opened in the record's window", created.length > 0 && created.every((c) => c.windowId === 1), JSON.stringify(created.filter((c) => c.windowId !== 1).slice(0, 2))],
+    ["group named \"131530 IR\", open", groupTitles.some((o) => o.title === "131530 IR" && o.collapsed === false), JSON.stringify(groupTitles)],
+    ["one tab per Awin page, kept open after the run", Object.keys(run.tabs || {}).length === 10 && Object.values(run.tabs).every((tid) => tabs.has(tid)), JSON.stringify(run.tabs)],
+    ["each page's tab is reused for its fixes (no extra tabs)", created.filter((c) => /ui\.awin\.com/.test(c.url)).length === 10, `${created.filter((c) => /ui\.awin\.com/.test(c.url)).length} Awin tabs opened`],
+    ["each page's tab marked ✓ or ⚠", marks.length === 10 && marks.every(([, m]) => m === "✓" || m === "⚠"), JSON.stringify(marks)]
   ];
   let failed = 0;
   for (const [name, okk, detail] of checks) { console.log(`${okk ? "ok  " : "FAIL"} ${name}${detail ? " · " + detail : ""}`); if (!okk) failed++; }

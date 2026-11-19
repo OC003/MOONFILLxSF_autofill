@@ -218,3 +218,22 @@ test("pages: manual approval is set by the option's text, whatever its value", a
   await w.OIRPage.apply({ pageKey: "migrated", target: "manualApproval", to: "On" }, "131530");
   assert.equal(w.document.getElementById("a1").value, "0");
 });
+
+test("pages: Main settings is read at once by its ids, even when no label matches word for word", async () => {
+  // what timed out on a live record ("Read: Main settings · no answer after 60 s"): the readiness test
+  // only knew the labels, so it waited its full time
+  const big = Array.from({ length: 400 }, (_, i) => `<div class="row"><span>Setting ${i}</span><div>${"text ".repeat(30)}</div></div>`).join("");
+  const w = awinPage(`<h1>132056</h1>${big}<form><label>Main URL of the programme</label><input id="MainWebsiteURL" value="https://tq0qfq-ke.myshopify.com">
+    <label>Click-through page</label><input id="GlobalClickThroughPage" value="https://rjhltech.co.uk">
+    <label>Append to every click</label><input id="ClickAppend" value="source=aw">
+    <input type="checkbox" id="DeeplinkEnabled" checked></form>`,
+    "https://ui.awin.com/tracking-settings/us/awin/advertiser/132056/main-settings");
+  const t0 = Date.now();
+  const r = await w.OIRPage.scrape("main", "132056");
+  assert.ok(Date.now() - t0 < 5000, `read in ${Date.now() - t0} ms`);
+  assert.equal(r.ok, true);
+  assert.equal(r.fields.website, "https://tq0qfq-ke.myshopify.com");
+  assert.equal(r.fields.landingPage, "https://rjhltech.co.uk");
+  assert.equal(r.fields.append, "source=aw");
+  assert.equal(r.fields.linkBuilder, true);
+});
