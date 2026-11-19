@@ -39,6 +39,10 @@
       <option value="advanced">Platform Offer: Advanced</option>
       <option value="fixed">Commission type: Fixed</option>
       <option value="no-amount">Commission Amount empty</option>
+      <option value="lazy">Sections drawn only when scrolled to</option>
+      <option value="lazy-edit">Sections drawn only in edit mode</option>
+      <option value="advanced+sv-renamed">Advanced, SingleView section named differently</option>
+      <option value="related-tab">Related tab showing</option>
     </select>
   </label>
 </div>
@@ -52,7 +56,10 @@
   const fromQuery = new URLSearchParams(location.search).get('scenario');
   if (fromQuery) scenarioSelect.value = fromQuery;
   scenarioSelect.addEventListener('change', () => { location.search = '?scenario=' + scenarioSelect.value; });
-  const scenario = scenarioSelect.value;
+  // Scenarios combine with +, e.g. ?scenario=advanced+lazy.
+  const scenario = fromQuery || scenarioSelect.value;
+  const flags = new Set(scenario.split(/[+ ]/));   // a + in the address reads as a space
+  const has = flag => flags.has(flag);
 
   const TEXT = ['Deduplication Parameter', 'Channel parameters implemented', 'Website Platform URL', 'Other eCommerce platform', 'Other Deduplication Solution', 'Other App tracking implemented', 'Product Feed format'];
   const AREA = ['Tech notes', 'Custom parameters notes'];
@@ -65,13 +72,13 @@
     return { label: f.label, kind, options, required: f.label === 'Img tag implemented' };
   };
   const technical = globalThis.TCA_FIELDS.map(field);
-  if (scenario === 'missing-option') technical.find(f => f.label === 'Server to server').options = ['--None--', 'No', 'Exempt'];
+  if (has('missing-option')) technical.find(f => f.label === 'Server to server').options = ['--None--', 'No', 'Exempt'];
   const commercial = [field({ label: 'Img tag implemented' }), field({ label: 'Tech notes' })];
   const singleView = [
     { label: 'SingleView Setup Type', kind: 'picklist', options: ['--None--', 'MasterTag Enabled', 'Manual'] },
     { label: 'SingleView Integration Status', kind: 'picklist', options: ['--None--', 'New', 'Live'] }
   ];
-  const sections = [{ key: 'TC', title: 'Technical Checklist', fields: technical }, { key: 'SV', title: 'SingleView Setup', fields: singleView }, { key: 'CC', title: 'Commercial Checklist', fields: commercial }];
+  const sections = [{ key: 'TC', title: 'Technical Checklist', fields: technical }, { key: 'SV', title: has('sv-renamed') ? 'SingleView' : 'SingleView Setup', fields: singleView }, { key: 'CC', title: 'Commercial Checklist', fields: commercial }];
 
   let record = {
     'TC::Server to server': 'No',
@@ -79,9 +86,15 @@
     'TC::Tech notes': 'Existing note from the implementer',
     'CC::Img tag implemented': 'No'
   };
-  if (scenario === 'dates-filled') Object.assign(record, { 'TC::Pixel Sent': '2026-10-01', 'TC::Successful Tracking Test': '2026-10-20' });
+  if (has('dates-filled')) Object.assign(record, { 'TC::Pixel Sent': '2026-10-01', 'TC::Successful Tracking Test': '2026-10-20' });
   let draft = null;
-  let collapsed = scenario === 'collapsed';
+  let collapsed = has('collapsed');
+  // Lightning draws a section only once it has been scrolled into view, or in edit mode. 'lazy': the
+  // Technical Checklist and SingleView Setup are placeholders until scrolled to; 'lazy-edit': until edit
+  // mode. Once drawn, a section stays drawn.
+  const drawn = new Set(has('lazy') || has('lazy-edit') ? ['CC'] : ['TC', 'SV', 'CC']);
+  // 'related-tab': the record opens on its Related tab; the sections are on the Details tab.
+  let detailsShowing = !has('related-tab');
   window.mockRecord = record;
   window.mockSaveCount = 0;
 
@@ -105,7 +118,7 @@
 
   function setDraft(key, value) {
     draft[key] = value;
-    if (scenario === 'dependent' && key === 'TC::Deduplication') draft['TC::Deduplication Solution'] = '';
+    if (has('dependent') && key === 'TC::Deduplication') draft['TC::Deduplication Solution'] = '';
     render();
   }
 
@@ -175,6 +188,11 @@
   }
 
   function sectionEl(s, values, editing, editable) {
+    if (editable && !drawn.has(s.key)) {
+      const placeholder = h('records-record-layout-section', { class: 'mock-lazy' }, h('div', { class: 'slds-section' }));
+      if (has('lazy')) placeholder.scrollIntoView = () => setTimeout(() => { if (!drawn.has(s.key)) { drawn.add(s.key); render(); } });
+      return placeholder;
+    }
     return h('records-record-layout-section', {},
       h('div', { class: 'slds-section slds-is-open' },
         h('h3', { class: 'slds-section__title' }, h('button', { type: 'button', class: 'slds-section__title-action', 'aria-expanded': String(!(editable && s.key === 'TC' && collapsed)), onclick: () => { if (editable && s.key === 'TC') { collapsed = !collapsed; render(); } } }, h('span', { class: 'test-id__section-header-title', text: s.title }))),
@@ -188,7 +206,7 @@
     const app = document.getElementById('app');
     app.replaceChildren(h('div', { class: 'record' },
       h('h1', { text: 'IMP-0001 · Fictional Retailer Ltd (mock)' }),
-      scenario === 'no-landing' ? null : h('records-record-layout-item', { 'field-label': 'Landing Page URL' },
+      has('no-landing') ? null : h('records-record-layout-item', { 'field-label': 'Landing Page URL' },
         h('div', { class: 'slds-form-element slds-form-element_readonly' },
           h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Landing Page URL' })),
           h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value' },
@@ -196,7 +214,7 @@
       h('div', { id: 'moonfillSalesforceSection' },
         h('a', { href: 'https://ui.awin.com/dashboard/awin/advertiser/123456', text: 'MID link (mock)' }),
         h('button', { type: 'button', class: 'mf-btn mf-impl', text: '🚀 New Implementation', onclick: () => { window.moonfillNIClicks = (window.moonfillNIClicks || 0) + 1; } })),
-      ...[['Commission type', scenario === 'fixed' ? 'Fixed' : 'Percentage'], ['Commission Amount', scenario === 'no-amount' ? '' : '5%'], ['Auto validation period', '30 days']].map(([label, text]) =>
+      ...[['Commission type', has('fixed') ? 'Fixed' : 'Percentage'], ['Commission Amount', has('no-amount') ? '' : '5%'], ['Auto validation period', '30 days']].map(([label, text]) =>
         h('records-record-layout-item', { 'field-label': label },
           h('div', { class: 'slds-form-element slds-form-element_readonly' },
             h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: label })),
@@ -204,25 +222,28 @@
       h('records-record-layout-item', { 'field-label': 'Platform Offer' },
         h('div', { class: 'slds-form-element slds-form-element_readonly' },
           h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Platform Offer' })),
-          h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value', text: scenario === 'no-landing' ? '' : scenario === 'advanced' ? 'Advanced' : 'Access' })))),
+          h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value', text: has('no-landing') ? '' : has('advanced') ? 'Advanced' : 'Access' })))),
       h('records-record-layout-item', { 'field-label': 'Assigned TC' },
         h('div', { class: 'slds-form-element slds-form-element_readonly' },
           h('div', { class: 'slds-form-element__label' }, h('span', { class: 'test-id__field-label', text: 'Assigned TC' })),
           h('div', { class: 'slds-form-element__control' }, h('span', { class: 'test-id__field-value' },
-            scenario === 'no-tc' ? null : h('a', { href: '/lightning/r/User/005MOCK/view', text: 'Alex Mock-Person' }))))),
-      ...sections.map(s => sectionEl(s, draft || record, !!draft, true)),
-      historyCard('03/11/2026', scenario !== 'no-history'),
+            has('no-tc') ? null : h('a', { href: '/lightning/r/User/005MOCK/view', text: 'Alex Mock-Person' }))))),
+      h('div', { class: 'slds-tabs_default' },
+        h('a', { 'data-tab-value': 'relatedTab', role: 'tab', 'aria-selected': String(!detailsShowing), text: 'Related', onclick: () => { detailsShowing = false; render(); } }),
+        h('a', { 'data-tab-value': 'detailTab', role: 'tab', 'aria-selected': String(detailsShowing), 'aria-controls': 'mock-details', text: 'Details', onclick: () => { detailsShowing = true; render(); } })),
+      h('div', { id: 'mock-details', role: 'tabpanel', ...(detailsShowing ? {} : { hidden: '' }) }, ...sections.map(s => sectionEl(s, draft || record, !!draft, true))),
+      historyCard('03/11/2026', !has('no-history')),
       draft ? h('records-form-footer', { class: 'slds-docked-form-footer' },
         h('button', { type: 'button', name: 'CancelEdit', text: 'Cancel', onclick: cancel }),
         h('button', { type: 'button', name: 'SaveEdit', text: 'Save', onclick: save })) : null));
   }
 
-  function enterEdit() { draft = { ...record }; document.getElementById('toasts').replaceChildren(); render(); }
+  function enterEdit() { for (const s of sections) drawn.add(s.key); draft = { ...record }; document.getElementById('toasts').replaceChildren(); render(); }
   function cancel() { draft = null; render(); }
   function save() {
     setTimeout(() => {
       const footer = document.querySelector('records-form-footer');
-      if (scenario === 'error') {
+      if (has('error')) {
         footer.querySelector('records-record-edit-error')?.remove();
         footer.prepend(h('records-record-edit-error', {}, h('div', { class: 'slds-popover_error', text: 'We hit a snag. Review the errors on this page.' })));
         return;

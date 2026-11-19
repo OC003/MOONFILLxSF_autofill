@@ -31,6 +31,9 @@
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 12px 16px; display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
   button { font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 4px; border: 1px solid var(--blue); background: var(--card); color: var(--blue); cursor: pointer; }
   button.primary { background: var(--blue); color: #fff; }
+  .styles { display: grid; gap: 8px; }
+  label.style { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  label.style:has(input:checked) { border-color: var(--blue); background: var(--changed); }
   .status[data-state="ok"] { color: var(--ok); }
   .status[data-state="error"] { color: var(--error); font-weight: 600; }
   @media (max-width: 640px) {
@@ -51,6 +54,16 @@
     <h2>Platform detection</h2>
     <p class="muted">When the panel's template is set to <strong>Auto-detect platform</strong>, Fill reads the client's site from the record's <strong>Landing Page URL</strong> to work out its eCommerce platform, then applies that platform's template. Reading other websites needs your permission, asked for once here. Without it, the default fill is used.</p>
     <p><span id="detect-status" class="muted">Checking…</span> <button id="detect-toggle" type="button" hidden></button></p>
+  </section>
+
+  <section class="card">
+    <h2>Menu style</h2>
+    <p class="muted">How the Checklist Autofill shows on Salesforce records. Changes apply straight away, in every open Salesforce tab.</p>
+    <div class="styles">
+      <label class="style"><input type="radio" name="menu-style" value="panel"> <span><strong>Panel</strong> (the original)<br><span class="muted">Docked at the bottom right; click its title to open or close it.</span></span></label>
+      <label class="style"><input type="radio" name="menu-style" value="orb"> <span><strong>Floating button</strong><br><span class="muted">A round button you can drag anywhere. Hover it (or click to keep it open) for the menu, which can also start a Moonpull scan, IR or the New Implementation setup.</span></span></label>
+    </div>
+    <p id="style-status" class="muted" role="status" aria-live="polite"></p>
   </section>
 
   <section class="card">

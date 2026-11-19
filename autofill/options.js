@@ -42,7 +42,9 @@
     return tr;
   }
 
+  const menuStyle = () => (document.querySelector('input[name="menu-style"]:checked') || {}).value || 'panel';
   function show(settings) {
+    for (const radio of document.querySelectorAll('input[name="menu-style"]')) radio.checked = radio.value === (settings.menuStyle || 'panel');
     $('date-format').value = settings.dateFormat || cfg.dateFormat;
     for (const tr of $('fields').children) {
       const o = (settings.fields || {})[tr.dataset.label];
@@ -55,6 +57,7 @@
 
   function read() {
     const out = { fields: {} };
+    if (menuStyle() !== 'panel') out.menuStyle = menuStyle();
     if ($('date-format').value !== cfg.dateFormat) out.dateFormat = $('date-format').value;
     for (const tr of $('fields').children) {
       const mode = tr.querySelector('.mode').value;
@@ -113,6 +116,17 @@
   for (const format of S.DATE_FORMATS) $('date-format').append(new Option(format, format));
   $('date-format').addEventListener('change', () => status(''));
   $('fields').append(...fields.map(row));
+  // The menu style is saved as soon as it's picked, on top of whatever is saved already.
+  for (const radio of document.querySelectorAll('input[name="menu-style"]')) {
+    radio.addEventListener('change', async () => {
+      try {
+        await S.save({ ...(await S.load()), menuStyle: menuStyle() });
+        $('style-status').textContent = menuStyle() === 'orb' ? 'Saved: the floating button is used.' : 'Saved: the panel is used.';
+      } catch (error) {
+        $('style-status').textContent = error.message;
+      }
+    });
+  }
   $('save').addEventListener('click', save);
   $('reset').addEventListener('click', reset);
   S.load().then(show);

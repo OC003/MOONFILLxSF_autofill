@@ -807,6 +807,7 @@ test('form: Hide leaves a small box above the panel; clicking it brings back the
   assert.deepEqual([...ui.querySelectorAll('li')].slice(0, 3).map(li => li.dataset.status), ['saved', 'skipped', 'saved']);
 
   ui.querySelector('.close').click();
+  for (let index = 3; index < 10; index++) chrome.listener({action: 'tcaSetupProgress', index, status: index === 6 ? 'skipped' : 'saved', message: index === 6 ? 'Skipped: comes pre-filled.' : 'Saved.'});
   chrome.listener({action: 'tcaSetupProgress', done: true, summary: '8 saved, 2 skipped', needsLook: 0});
   assert.equal(mini.hidden, false, 'the result stays until dismissed');
   assert.match(mini.querySelector('.label').textContent, /Setup finished: 8 saved, 2 skipped/);
@@ -831,7 +832,7 @@ test('form: the Awin logo rides at the front of both bars as a pixel fire, flick
   await tick(60);
   assert.deepEqual(src(), ['awin-fire.gif', 'awin-fire.gif'], 'flickering while it works');
   assert.deepEqual(logos.map(l => l.dataset.state), ['fire', 'fire']);
-  chrome.listener({action: 'tcaSetupProgress', index: 4, status: 'saved'});
+  for (let index = 0; index < 5; index++) chrome.listener({action: 'tcaSetupProgress', index, status: 'saved'});
   assert.match(logos[0].style.left, /50%/, 'at the front of the bar (5 of 10)');
   chrome.listener({action: 'tcaSetupProgress', done: true, summary: 'x', needsLook: 0});
   assert.deepEqual(src(), ['awin-fire-still.png', 'awin-fire-still.png'], 'still at the end');
@@ -894,17 +895,20 @@ test('form: after Run and save, a summary of what was done is posted to the reco
   const {window, ui, posts} = await chatterRun();
   assert.equal(posts().length, 1);
   const lines = posts()[0].text.split('\n');
-  assert.equal(lines[0], '🚀 Programme setup for MID 123456 (Access): done');
-  assert.equal(lines[1], '3 saved, 2 skipped, 5 not started.');
-  assert.deepEqual(lines.slice(2, 8), [
-    '✓ Tracking settings: saved',
-    '⏭ Invite user: skipped (comes pre-filled)',
-    '✓ Commission groups: saved (Sale, Percentage, 5%)',
-    '⚠ Plugin store: needs a look: The Add Plugin button wasn\'t found',
-    '✓ Tracking tag settings: saved',
-    '· Account details: not started'
+  // Plain and short: the commission group and validation period first, then only what needs a look.
+  assert.deepEqual(lines.slice(0, -1), [
+    'New Implementation setup for MID 123456 (Access)',
+    '',
+    'Default commission group: Sale, Percentage, 5%',
+    'Validation period: not set (Advertiser settings wasn\'t done)',
+    '',
+    'Pages: 3 saved, 1 skipped, 1 needs a look, 5 not started.',
+    'Needs a look: Plugin store (The Add Plugin button wasn\'t found).',
+    'Not started: Account details, Fee manager, Mobile tracking, Advertiser settings, Pre-join publishers.',
+    ''
   ]);
   assert.match(lines.at(-1), /^Posted by /);
+  assert.doesNotMatch(posts()[0].text, /[✓⚠⏭🚀]/u, 'no symbols');
   assert.doesNotMatch(posts()[0].text, /structure/, 'no diagnostics in Chatter');
   assert.equal(ui.querySelector('.chatter').textContent, '✓ Summary posted to the record\'s Chatter.');
   window.close();
@@ -1162,3 +1166,220 @@ test('manifest: the setup filler runs on ui.awin.com only, top frame, with no pa
   assert.equal(w.document.querySelector('[id^="tca-"]'), null, 'nothing is added to Awin pages');
 });
 
+
+// ---------- SingleView Setup: found even when not drawn yet, or named differently ----------
+
+test('form: SingleView Setup is set when its section is named differently, not drawn yet, or drawn only in edit mode', async () => {
+  for (const scenario of ['advanced+sv-renamed', 'advanced+lazy', 'advanced+lazy-edit']) {
+    const window = await record(fakeChrome(), scenario);
+    await window.TCASetupForm.open();
+    const ui = formRoot(window);
+    ui.querySelector('.run').click();
+    assert.equal(await singleViewNote(ui), '✓ SingleView Setup saved on the record (MasterTag Enabled, New).', scenario);
+    assert.equal(sv(window, 'SingleView Setup Type'), 'MasterTag Enabled', scenario);
+    assert.equal(sv(window, 'SingleView Integration Status'), 'New', scenario);
+    window.close();
+  }
+});
+
+// ---------- Signed out of Awin: sign in, and retry the pages that didn't work ----------
+
+// The runner, recording every message it sends in full.
+function fullRunner(answers) {
+  const r = runner(answers);
+  r.full = [];
+  const send = r.context.chrome.tabs.sendMessage;
+  r.context.chrome.tabs.sendMessage = async (tabId, m) => { r.full.push(m); return send(tabId, m); };
+  r.done = async () => { for (let i = 0; i < 300 && !r.context.notified; i++) await tick(10); const n = r.context.notified; r.context.notified = null; return n; };
+  return r;
+}
+
+test('runner: a page on Awin\'s sign-in while signed out stops the run; the pages after it wait for a retry', async () => {
+  const r = fullRunner((index, m) => {
+    if (m.action === 'tcaSetupFill') return index === 3 ? {status: 'signin', message: 'Awin\'s sign-in page is showing.', login: true} : {status: 'filled', message: 'Filled.'};
+    return {ok: true};
+  });
+  r.context.fetch = async () => ({url: 'https://id.awin.com/authorize?client=x', status: 200, ok: true});
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false});
+  const notified = await r.done();
+  const progress = r.full.filter(m => m.action === 'tcaSetupProgress');
+  const plugin = progress.find(m => m.index === 3 && m.status === 'failed');
+  assert.equal(plugin.signin, true);
+  assert.match(plugin.message, /Awin asked to sign in again in this tab/);
+  const waiting = progress.filter(m => m.status === 'cancelled');
+  assert.deepEqual(waiting.map(m => m.index), [4, 5, 6, 7, 8, 9]);
+  assert.ok(waiting.every(m => m.message === 'not started: signed out of Awin'));
+  assert.equal(progress.at(-1).signedOut, true);
+  assert.match(notified.title, /signed out of Awin/);
+  assert.equal(r.created.length, 5, 'nothing opened beyond the one page ahead');
+  assert.equal(r.context.usage[0].reason, 'setup-signed-out');
+});
+
+test('runner: a failed page that ended on Awin\'s sign-in (the address says so) is flagged for signing in', async () => {
+  const r = fullRunner((index, m) => (m.action === 'tcaSetupFill' ? (index === 5 ? {status: 'failed', message: 'The page didn\'t respond.'} : {status: 'filled', message: 'Filled.'}) : {ok: true}));
+  r.context.chrome.tabs.get = async id => ({id, status: 'complete', url: id === 105 ? 'https://id.awin.com/login' : `https://ui.awin.com/page${id - 100}/1`});
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false});
+  await r.done();
+  const page = r.full.find(m => m.action === 'tcaSetupProgress' && m.index === 5 && m.status === 'failed');
+  assert.equal(page.signin, true);
+  assert.equal(page.message, 'Awin showed its sign-in page in this tab.');
+  assert.ok(r.full.some(m => m.action === 'tcaSetupProgress' && m.index === 9 && m.status === 'filled'), 'still signed in: the run carried on');
+});
+
+test('runner: Retry failed pages does only those pages, in their tabs from the run, and isn\'t counted as another setup', async () => {
+  const fills = [];
+  const r = fullRunner((index, m) => { if (m.action === 'tcaSetupFill') { fills.push(index); return {status: 'filled', message: 'Filled.'}; } return {ok: true}; });
+  const updated = [];
+  r.context.chrome.tabs.update = async (id, o) => { updated.push([id, o.url]); return {id, ...o}; };
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false});
+  await r.done();
+  fills.length = 0;
+  r.full.length = 0;
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false, only: [8, 3]});
+  const notified = await r.done();
+  assert.deepEqual(fills, [3, 8]);
+  assert.deepEqual(updated, [[103, 'https://ui.awin.com/page3/1'], [108, 'https://ui.awin.com/page8/1']], 'their tabs, loaded again');
+  assert.equal(r.created.length, 10, 'no new tabs');
+  assert.deepEqual([...new Set(r.full.filter(m => m.action === 'tcaSetupProgress' && !m.done).map(m => m.index))], [3, 8], 'progress only for those pages');
+  assert.deepEqual(plain(r.full.at(-1).retried), [3, 8]);
+  assert.match(notified.message, /^2 filled \(not saved\)/);
+  assert.equal(r.context.usage.length, 1, 'only the first run is counted');
+});
+
+test('runner: Sign in brings the tab showing Awin\'s sign-in to the front; without one, Awin opens in a new tab', async () => {
+  const r = fullRunner((index, m) => (m.action === 'tcaSetupFill' ? {status: 'filled', message: 'Filled.'} : {ok: true}));
+  const shown = [];
+  r.context.chrome.tabs.update = async (id, o) => { shown.push([id, o.active]); return {id, windowId: 3}; };
+  r.context.chrome.windows = {update: async (id, o) => { shown.push(['window', id, o.focused]); }};
+  await r.start({action: 'tcaSetupRun', mid: '1', values: VALUES, save: false});
+  await r.done();
+  assert.deepEqual(plain(await r.start({action: 'tcaSetupShowTab', index: 4})), {ok: true});
+  assert.deepEqual(shown, [[104, true], ['window', 3, true]]);
+  assert.deepEqual(plain(await r.start({action: 'tcaSetupShowTab', index: 99})), {ok: true, opened: true});
+  assert.equal(r.created.at(-1).url, 'https://ui.awin.com/');
+  assert.equal(r.created.at(-1).active, true);
+});
+
+test('runner: the sign-in check also reads the page: a sign-in form served as a normal page means signed out', async () => {
+  const {context} = runner(() => ({ok: true}));
+  const page = html => async () => ({url: 'https://ui.awin.com/provider/migrated-advertiser-settings/1', status: 200, ok: true, text: async () => html});
+  context.fetch = page('<html><body><form action="/idp/login" method="post"><input name="u"><input type="password" name="p"></form></body></html>');
+  assert.deepEqual(plain(await context.TCASetupRunner.checkSession('1')), {signedIn: false, detail: 'Awin showed its sign-in form'});
+  context.fetch = page('<html><body><h1>Advertiser settings</h1><form action="/provider/save"><input name="days"></form></body></html>');
+  assert.deepEqual(plain(await context.TCASetupRunner.checkSession('1')), {signedIn: true});
+  context.fetch = async () => ({url: 'https://ui.awin.com/idp/awin/prelogin', status: 200, ok: true, text: async () => ''});
+  assert.equal((await context.TCASetupRunner.checkSession('1')).signedIn, false);
+});
+
+test('page: a sign-in form showing where a setup page should be is reported as a sign-in, not a failure', async () => {
+  const w = awin('/tracking-settings/en/awin/main-settings', '<form action="/login"><input name="user"><input type="password" name="pass"><button>Sign in</button></form>');
+  const r = await fill(w);
+  assert.equal(r.status, 'signin');
+  assert.equal(r.login, true);
+});
+
+test('form: with a stale sign-in check, Run and save checks again first; signed out, nothing starts', async () => {
+  let signedIn = true;
+  const chrome = fakeChrome(undefined, () => ({signedIn}));
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  signedIn = false;
+  const now = window.Date.now;
+  window.Date.now = () => now() + 120000;   // the box has been open two minutes
+  ui.querySelector('.run').click();
+  await tick(30);
+  assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupRun').length, 0);
+  assert.match(ui.querySelector('.session-text').textContent, /not signed in to Awin/);
+  assert.equal(ui.querySelector('.run').disabled, true);
+  window.close();
+});
+
+test('form: after failed pages, Sign in shows the sign-in tab and Retry failed pages redoes only those; the summary covers all ten', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  const send = u => chrome.listener({action: 'tcaSetupProgress', ...u});
+  const statuses = ['saved', 'skipped', 'saved', 'failed', 'saved', 'saved', 'skipped', 'saved', 'unconfirmed', 'saved'];
+  statuses.forEach((status, index) => send({index, status, message: status === 'failed' ? 'Awin asked to sign in again in this tab.' : `${status}.`, signin: index === 3}));
+  send({done: true, summary: 'ignored', needsLook: 2});
+  await tick(30);
+  assert.equal(ui.querySelector('.current').textContent, 'Finished: 6 saved, 2 skipped, 2 need a look.');
+  assert.equal(ui.querySelector('.retry').hidden, false);
+  assert.equal(ui.querySelector('.retry').textContent, 'Retry failed pages (2)');
+  assert.equal(ui.querySelector('.signin-page').hidden, false);
+  assert.match(ui.querySelector('.signin-text').textContent, /sign in on Plugin store/);
+
+  ui.querySelector('.signin-page').click();
+  await tick();
+  assert.deepEqual(plain(chrome.messages.at(-1)), {action: 'tcaSetupShowTab', index: 3});
+
+  const checks = chrome.messages.filter(m => m.action === 'tcaSetupCheckSession').length;
+  ui.querySelector('.retry').click();
+  await tick(30);
+  assert.equal(chrome.messages.filter(m => m.action === 'tcaSetupCheckSession').length, checks + 1, 'signed in? checked first');
+  const retry = chrome.messages.filter(m => m.action === 'tcaSetupRun').at(-1);
+  assert.deepEqual(plain(retry.only), [3, 8]);
+  assert.equal(retry.save, true);
+  assert.equal(ui.querySelector('.count').textContent, '8 / 10');
+  assert.equal(ui.querySelector('li[data-index="3"]').dataset.status, undefined, 'the retried pages start again');
+  assert.equal(ui.querySelector('li[data-index="0"]').dataset.status, 'saved', 'the others keep their result');
+  assert.equal(ui.querySelector('.retry').hidden, true);
+
+  send({index: 3, status: 'saved', message: 'Saved.'});
+  send({index: 8, status: 'saved', message: 'Saved and checked.'});
+  send({done: true, summary: '2 saved', needsLook: 0, retried: [3, 8]});
+  await tick(30);
+  assert.equal(ui.querySelector('.current').textContent, 'Finished: 8 saved, 2 skipped.');
+  assert.equal(ui.querySelector('.retry').hidden, true, 'nothing left to retry');
+  const post = chrome.messages.filter(m => m.action === 'tcaSetupChatter').at(-1).text;
+  assert.match(post, /^New Implementation setup for MID 123456 \(Access\), after a retry\n/);
+  assert.match(post, /\nValidation period: 37 days \(30 \+ 7 for Access\)\n/);
+  assert.match(post, /\nPages: 8 saved, 2 skipped\.\n/);
+  assert.doesNotMatch(post, /Needs a look|Not started/);
+  window.close();
+});
+
+test('form: stopped because Awin signed out: says so, and offers Sign in and Retry for the pages not done', async () => {
+  const chrome = fakeChrome();
+  const window = await record(chrome);
+  await window.TCASetupForm.open();
+  const ui = formRoot(window);
+  ui.querySelector('.run').click();
+  await tick(30);
+  const send = u => chrome.listener({action: 'tcaSetupProgress', ...u});
+  send({index: 0, status: 'saved', message: 'Saved.'});
+  send({index: 1, status: 'skipped', message: 'Skipped: comes pre-filled.'});
+  send({index: 2, status: 'failed', message: 'Awin asked to sign in again in this tab.', signin: true});
+  for (let index = 3; index < 10; index++) send({index, status: 'cancelled', message: 'not started: signed out of Awin'});
+  send({done: true, summary: 'x', signedOut: true, needsLook: 1});
+  await tick(30);
+  assert.match(ui.querySelector('.current').textContent, /^Stopped: Awin signed you out\. 1 saved, 1 skipped, 1 needs a look, 7 not started\.$/);
+  assert.match(ui.querySelector('.signin-text').textContent, /signed you out during the setup/);
+  assert.equal(ui.querySelector('.retry').textContent, 'Retry failed pages (8)');
+  assert.match(ui.querySelector('.mini .label').textContent, /stopped: sign in to Awin/);
+  window.close();
+});
+
+test('form: the Chatter summary puts the commission group and validation period first, kept or set', async () => {
+  const {window, posts} = await chatterRun({scenario: 'advanced', updates: [
+    {index: 2, status: 'saved', message: 'Saved and checked.'},
+    {index: 8, status: 'saved', message: 'Saved and checked.'}
+  ]});
+  const lines = posts()[0].text.split('\n');
+  assert.equal(lines[0], 'New Implementation setup for MID 123456 (Advanced)');
+  assert.equal(lines[2], 'Default commission group: Sale, Percentage, 5%');
+  assert.equal(lines[3], 'Validation period: 30 days');
+  window.close();
+  const access = await chatterRun({updates: [
+    {index: 2, status: 'failed', message: 'The commission table wasn\'t found.'},
+    {index: 8, status: 'saved', message: 'Saved and checked. Validation Period Days already set (45): left as it is.', note: 'Validation Period Days already set (45): left as it is.'}
+  ]});
+  const text = access.posts()[0].text;
+  assert.match(text, /\nDefault commission group: Sale, Percentage, 5%, but Commission groups needs a look\n/);
+  assert.match(text, /\nValidation period: 45 days \(already set, kept\)\n/);
+  access.window.close();
+});

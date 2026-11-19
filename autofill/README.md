@@ -48,7 +48,7 @@ npm run check   # syntax check of autofill/*.js
 
 ## Taking upstream Moonfill updates
 
-The `upstream` remote points at the original Moonfill repository (fetch only). The scan files are kept identical to it, so its updates merge cleanly. Only `manifest.json` (content scripts, settings page and optional permissions), the last line of `background.js` and `README.md` may need a hand merge.
+The `upstream` remote points at the original Moonfill repository (fetch only). The scan files are kept identical to it, so its updates merge cleanly. `salesforce.js` matches upstream's `dev` as of 2026-11-18 (`138a3d5`): its scan-field fill waits for fields lower on the page and takes the `<html data-awin-edit-lock>` lock, which the checklist engine also takes (`engine.run`), so the two never write to the record at once. Only `manifest.json` (content scripts, settings page and optional permissions), the last line of `background.js` and `README.md` may need a hand merge.
 
 ```sh
 git fetch upstream

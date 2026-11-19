@@ -48,7 +48,9 @@ The **History** button lists your latest scans with program, MID and status.
 
 ### Technical Checklist
 
-Open an Implementation record on its **Details** tab. The **Checklist Autofill** panel at the bottom right shows a green dot when it can see the Technical Checklist.
+Open an Implementation record. The **Checklist Autofill** panel at the bottom right shows a green dot when it can see the Technical Checklist. You don't have to scroll down to the checklist first: Salesforce only draws a section once it has been on screen, so **Fill** opens the **Details** tab, brings the checklist up itself (switching the form to edit mode if that's what it takes) and then fills it. If Moonfill is filling the scan fields on the same record at that moment, the fill waits for it to finish.
+
+**Menu style.** In **Settings → Menu style** you can swap the panel for a **floating button**: a round blue button you can drag anywhere on the page (it stays where you put it, in every Salesforce tab). Hover it for its menu, or click it to keep the menu open. The menu has the same controls as the panel, plus **🌙 Scan**, **🔎 IR** and **🚀 Setup**, which start those processes just like Moonfill's buttons on the record.
 
 | Button | What it does |
 |---|---|
@@ -74,7 +76,7 @@ The other 15 fields, such as Tech notes, are left untouched. If the Implementati
 
 Template values only fill **empty** fields, so an answer that's already there is kept. If there's no Landing Page URL, no platform is recognised, or the signs point to two platforms, the default fill is used and the panel says why. Detection needs permission to read websites, which you grant once in Settings (**Allow platform detection**). Until then, the default fill is used.
 
-**SingleView Setup.** For **Accelerate** and **Advanced** programmes (the record's Platform Offer), the 🚀 setup sets the record's **SingleView Setup** checklist as it starts: SingleView Setup Type → **MasterTag Enabled**, SingleView Integration Status → **New**. **Run and save** saves it; **Fill only** leaves it unsaved. The result shows under the progress bar. For Access, and in the Technical Checklist fill, it's left alone.
+**SingleView Setup.** For **Accelerate** and **Advanced** programmes (the record's Platform Offer), the 🚀 setup sets the record's **SingleView Setup** checklist as it starts: SingleView Setup Type → **MasterTag Enabled**, SingleView Integration Status → **New**. **Run and save** saves it; **Fill only** leaves it unsaved. The result shows under the progress bar. For Access, and in the Technical Checklist fill, it's left alone. It doesn't matter whether that section has been scrolled to, or what the record's layout calls it: the fields are found by their names.
 
 **Settings.** For every checklist field you can choose:
 - **Team default** (the agreed answer)
@@ -97,7 +99,7 @@ Clicking **🚀 New Implementation** on a record sets up the programme in Awin. 
 | Approval of Publishers Joining | always **Manual Approval** |
 | Validation Period Days | **Auto validation period**. For Access, a value already on the page is kept; if it's empty or -1, it becomes the period + 7 |
 
-Before anything starts, the box checks you're signed in to Awin. If you're not, it says so, with **Open Awin** and **Check again**. It also checks the record has everything listed above. If something is missing, it lists it, with **Enter the details by hand**, which opens a form filled in with whatever the record has. Without a Landing Page URL or Platform Offer, that form is the only way to run it.
+Before anything starts, the box checks you're signed in to Awin (looking at the page Awin sends back, not just its address), and checks again when you click **Run and save** if the box has been open for more than a minute. If you're not signed in, it says so, with **Open Awin** and **Check again**. It also checks the record has everything listed above. If something is missing, it lists it, with **Enter the details by hand**, which opens a form filled in with whatever the record has. Without a Landing Page URL or Platform Offer, that form is the only way to run it.
 
 You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**. A progress bar then shows the pages being done one at a time. The red **✕** cancels: the page being filled is finished, and the rest aren't started.
 
@@ -113,9 +115,23 @@ You're asked only whether to save: **Run and save**, **Fill only** or **Cancel**
 | Advertiser settings | Manual Approval, Validation Period Days |
 | Pre-join publishers | Publishers 45628 and 111, retried up to 5 times if the page shows an error |
 
+**Signed out during a run.** If a page lands on Awin's sign-in instead, it's marked ⚠ and the box offers **Sign in to Awin**, which brings that tab to the front so you can sign in there. If Awin has signed you out altogether, the setup stops rather than failing every page after it. Either way, **Retry failed pages** then redoes only the pages that didn't work (and those not started), in their own tabs, after checking you're signed in again.
+
 Each tab is marked ✓ saved, ✎ filled, ⏭ skipped or ⚠ needs a look. **Details** under the progress bar lists each page's result, and **Copy results** copies it. A MID of 0 (advertiser not created in Awin yet) can't be run. **Just open the tabs** opens the pages without filling anything, as before.
 
-**Summary in Chatter.** After **Run and save**, if at least one page was saved, a summary is posted to the record's **Chatter**: each page's result (saved, skipped and why, needs a look and why, not started), the commission group used and the SingleView Setup result. If the record tab isn't in front when the run ends, it's posted as soon as you come back to it. **Fill only** posts nothing. Posting opens the record's Chatter tab.
+**Summary in Chatter.** After **Run and save**, if at least one page was saved, a short plain summary is posted to the record's **Chatter**. At the top: the **default commission group** and the **validation period** as they were set (or why not). Then one line of page counts, and only what needs attention: the pages that need a look (and why) and any not started, plus the SingleView Setup result. After **Retry failed pages**, an updated summary is posted. If the record tab isn't in front when the run ends, it's posted as soon as you come back to it. **Fill only** posts nothing. Posting opens the record's Chatter tab.
+
+```
+New Implementation setup for MID 123456 (Accelerate)
+
+Default commission group: Sale, Percentage, 5%
+Validation period: 30 days
+
+Pages: 8 saved, 2 skipped.
+SingleView Setup: MasterTag Enabled, New.
+
+Posted by UI_AutoSetup_Prototype v3.0.2 AutoSetup prototype.
+```
 
 While the setup runs, the **Awin logo** at the front of the progress bar is a little pixel fire, flickering in the logo's own shape and colours. It stands still when the run ends.
 
@@ -254,6 +270,11 @@ Scans built by Rodier for Awin agents. The Technical Checklist comes from Salesf
 - Usage counting by Assigned TC, to measure adoption. No client information is recorded.
 - **New Implementation setup:** a form on 🚀, then the setup pages are filled and saved one by one.
 - **Clear checklist** preset in the Template menu.
+- **The checklist needn't have been seen first:** Fill opens the Details tab and brings up the checklist (or SingleView Setup) itself, even if it was never scrolled to (as in Moonfill's own Techfill).
+- **Floating button** menu style (Settings), draggable, with 🌙 Scan, 🔎 IR and 🚀 Setup in its menu.
+- **Setup sign-in:** a sign-in page shown in a setup tab gets **Sign in to Awin**; a sign-out stops the run; **Retry failed pages** redoes only what didn't work.
+- **Simpler Chatter summary**, with the commission group and validation period first.
+- Moonfill's scan-field fill and the checklist fill never write to the record at the same time (a shared lock, from Moonfill upstream).
 
 **v2.1**
 - **Fills Salesforce fields from the result**, silently, right after the result is pasted: Moonpull Status, Consent Signals, Transparency & Consent Framework Plugin, AASAF and Consent Management Platform are set (existing values replaced) and saved. No setting; the notification only mentions fields that need a look.

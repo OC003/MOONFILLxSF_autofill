@@ -1,5 +1,7 @@
 // Programme setup, stage 3 (background): runs the setup started from the 🚀 New Implementation form.
-//   { action: 'tcaSetupRun', mid, values, save }  →  { ok } at once; progress goes back to the record tab
+//   { action: 'tcaSetupRun', mid, values, save, only? }  →  { ok } at once; progress goes back to the record tab
+//   only: the pages to do (by position), for "Retry failed pages": the others are left as they are, and
+//   the tabs still open from the last run for this MID are used again.
 // Opens Moonfill's New Implementation pages (its NI_URLS) as a tab group, then works through them one
 // at a time: fill, save, wait for the page to settle, check. A page that fails is marked ⚠ and left
 // open, unsaved, and the run carries on. Pre-join publishers is retried, as it often errors once.
@@ -78,6 +80,16 @@
     }
   }
 
+  // Is this tab showing one of Awin's sign-in pages (or any page off ui.awin.com, where the setup
+  // pages never are)? The content script can't answer there, so the tab's address is checked here.
+  const SIGNIN_PATH = /login|signin|sign-in|\/idp\/|authori[sz]e|\/oidc|\/sso|prelogin|callback/i;
+  async function onSignInPage(tabId) {
+    try {
+      const url = new URL((await chrome.tabs.get(tabId)).url || '');
+      return url.hostname !== 'ui.awin.com' || SIGNIN_PATH.test(url.pathname);
+    } catch { return false; }
+  }
+
   // Asks the page to fill itself; if it's on Awin's sign-in pages (a redirect still going on), waits
   // for it to come back to the setup page first.
   async function fillWhenReady(tabId, values, save) {
@@ -85,7 +97,7 @@
       const filled = await ask(tabId, { action: 'tcaSetupFill', values, save });
       if (filled.status !== 'signin') return filled;
       if (wait >= T.signinWaits) {
-        return { status: 'failed', message: filled.login ? 'Awin asked to sign in again in this tab. Sign in to Awin, then run the setup again.' : `${filled.message} It didn't return to the setup page.` };
+        return { status: 'failed', signin: true, message: filled.login ? 'Awin asked to sign in again in this tab.' : `${filled.message} It didn't return to the setup page.` };
       }
       await waitAfterSave(tabId);   // a redirect: wait for the next page load
       await sleep(T.settle);
@@ -108,7 +120,11 @@
     return { ...result, message: `${result.message} (tried ${T.retries} times)` };
   }
 
-  async function run({ mid, values, save }, recordTabId) {
+  // The latest run's tabs, by page position: "Retry failed pages" uses them again, and "Sign in"
+  // brings the one showing Awin's sign-in to the front.
+  const last = { mid: null, tabs: [], group: null };
+
+  async function run({ mid, values, save, only }, recordTabId) {
     const progress = update => chrome.tabs.sendMessage(recordTabId, { action: 'tcaSetupProgress', ...update }).catch(() => {});
     cancelRequested = false;
     const urls = typeof NI_URLS === 'function' ? NI_URLS(mid) : null;   // Moonfill's page list (background.js)
@@ -116,37 +132,48 @@
       progress({ done: true, error: 'Moonfill\'s list of New Implementation pages has changed, so the setup can\'t run. Use "Just open the tabs".' });
       return;
     }
+    const pages = Array.isArray(only) && only.length ? [...new Set(only.map(Number))].filter(i => i >= 0 && i < urls.length).sort((a, b) => a - b) : urls.map((u, i) => i);
+    const retrying = Array.isArray(only) && only.length > 0;
+    if (!retrying || last.mid !== mid) Object.assign(last, { mid, tabs: [], group: null });
     // Tabs open one at a time, as each page's turn comes: opening all ten at once sends some of them
     // to Awin's sign-in pages.
     // To save time, the next page is opened once the current one has loaded (its sign-in is done),
     // so it loads while the current one is being filled. Never more than one page ahead.
-    const tabs = [];
+    const tabs = last.tabs;
     const opening = [];
     const openedAt = [];
-    let group = null;
-    const ensureOpen = i => (i < urls.length ? (opening[i] = opening[i] || open(i)) : Promise.resolve(null));
-    const open = async i => {
-      if (i > 0) await opening[i - 1];   // keep the tabs in order
-      const tab = await chrome.tabs.create({ url: urls[i], active: false });
+    const ensureOpen = k => (k < pages.length ? (opening[k] = opening[k] || open(k)) : Promise.resolve(null));
+    const open = async k => {
+      if (k > 0) await opening[k - 1];   // keep the tabs in order
+      const i = pages[k];
+      let tab = null;
+      if (retrying && tabs[i]) {   // a retry: the page's tab from the last run, loaded again
+        try { tab = await chrome.tabs.update(tabs[i].id, { url: urls[i] }); } catch { tab = null; }
+      }
+      if (!tab) {
+        tab = await chrome.tabs.create({ url: urls[i], active: false });
+        try {
+          if (last.group === null) { last.group = await chrome.tabs.group({ tabIds: [tab.id] }); await chrome.tabGroups.update(last.group, { title: `${mid} setup`, color: 'cyan' }); }
+          else await chrome.tabs.group({ groupId: last.group, tabIds: [tab.id] });
+        } catch { /* grouping is a nicety */ }
+      }
       tabs[i] = tab;
       openedAt[i] = Date.now();
-      try {
-        if (group === null) { group = await chrome.tabs.group({ tabIds: [tab.id] }); await chrome.tabGroups.update(group, { title: `${mid} setup`, color: 'cyan' }); }
-        else await chrome.tabs.group({ groupId: group, tabIds: [tab.id] });
-      } catch { /* grouping is a nicety */ }
       return tab;
     };
 
     const results = [];
+    let signedOut = false;
     // Keeps the background script awake for the whole run, even with the browser in the background.
     const awake = setInterval(() => { try { chrome.runtime.getPlatformInfo().catch(() => {}); } catch { /* not available */ } }, T.keepAlive);
     try {
-    for (let i = 0; i < urls.length; i++) {
+    for (let k = 0; k < pages.length; k++) {
+      const i = pages[k];
       progress({ index: i, name: PAGES[i], status: 'working' });
-      await ensureOpen(i);
+      await ensureOpen(k);
       let result;
       if (cancelRequested) {
-        for (let j = i; j < urls.length; j++) progress({ index: j, name: PAGES[j], status: 'cancelled', message: 'not started (cancelled)' });
+        for (let j = k; j < pages.length; j++) progress({ index: pages[j], name: PAGES[pages[j]], status: 'cancelled', message: 'not started (cancelled)' });
         break;
       }
       const skip = ALWAYS_SKIPPED.has(i) ? 'comes pre-filled'
@@ -158,12 +185,12 @@
         results.push({ name: PAGES[i], ...result });
         chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL[result.status] }).catch(() => {});
         progress({ index: i, name: PAGES[i], status: result.status, message: result.message });
-        ensureOpen(i + 1);
+        ensureOpen(k + 1);
         continue;
       }
       try {
         await waitForLoad(tabs[i].id);
-        ensureOpen(i + 1);
+        ensureOpen(k + 1);
         if (RELOAD_FIRST.has(i)) {
           progress({ index: i, name: PAGES[i], status: 'working', message: 'reloading the page first' });
           await sleep(Math.max(0, T.reloadDelay - (Date.now() - openedAt[i])));   // 5 s after it opened
@@ -172,15 +199,26 @@
         await sleep(T.settle);
         // A page that never answers (for example after the Awin session expired) can't hold up the run.
         let timer;
-        const limit = new Promise(resolve => { timer = setTimeout(() => resolve({ status: 'failed', message: `No result after ${Math.round(T.pageLimit / 1000)} s. If your Awin session has expired, sign in and run the setup again.` }), T.pageLimit); });
+        const limit = new Promise(resolve => { timer = setTimeout(() => resolve({ status: 'failed', message: `No result after ${Math.round(T.pageLimit / 1000)} s. If your Awin session has expired, sign in, then use Retry failed pages.` }), T.pageLimit); });
         result = await Promise.race([runPage(tabs[i].id, values, save), limit]);
         clearTimeout(timer);
       } catch (error) {
         result = { status: 'failed', message: `Unexpected error: ${error.message}` };
       }
+      // A page that failed on Awin's sign-in page (or never answered there) is flagged, so the TC is
+      // offered to sign in in that tab and retry.
+      if (result.status === 'failed' && !result.signin && tabs[i] && await onSignInPage(tabs[i].id)) {
+        result = { ...result, signin: true, message: 'Awin showed its sign-in page in this tab.' };
+      }
       results.push({ name: PAGES[i], ...result });
       chrome.tabs.sendMessage(tabs[i].id, { action: 'tcaSetupMark', symbol: SYMBOL[result.status] || '⚠' }).catch(() => {});
-      progress({ index: i, name: PAGES[i], status: result.status, message: result.message, note: result.note, diagnostics: result.diagnostics });
+      progress({ index: i, name: PAGES[i], status: result.status, message: result.message, note: result.note, diagnostics: result.diagnostics, signin: !!result.signin });
+      // Signed out of Awin altogether? Then the next pages would only fail the same way: stop here.
+      if (result.signin && k < pages.length - 1 && (await checkSession(mid)).signedIn === false) {
+        signedOut = true;
+        for (let j = k + 1; j < pages.length; j++) progress({ index: pages[j], name: PAGES[pages[j]], status: 'cancelled', message: 'not started: signed out of Awin' });
+        break;
+      }
     }
     } finally {
       clearInterval(awake);
@@ -189,20 +227,20 @@
     const needsLook = results.filter(r => r.status === 'failed' || r.status === 'unconfirmed');
     const count = s => results.filter(r => r.status === s).length;
     const cancelled = cancelRequested;
-    const notStarted = urls.length - results.length;
+    const notStarted = pages.length - results.length;
     const summary = [count('saved') && `${count('saved')} saved`, count('filled') && `${count('filled')} filled (not saved)`,
       count('skipped') && `${count('skipped')} skipped`, needsLook.length && `${needsLook.length} need a look`,
-      cancelled && notStarted && `${notStarted} not started`].filter(Boolean).join(', ') || 'nothing done';
+      (cancelled || signedOut) && notStarted && `${notStarted} not started`].filter(Boolean).join(', ') || 'nothing done';
     cancelRequested = false;
-    progress({ done: true, summary, cancelled, needsLook: needsLook.length });
+    progress({ done: true, summary, cancelled, signedOut, needsLook: needsLook.length, retried: retrying ? pages : null });
     try {
       chrome.notifications.create(`tcaSetup-${mid}-${Date.now()}`, {
-        type: 'basic', iconUrl: 'assets/autosetup128.png', title: `Setup for MID ${mid}: ${cancelled ? 'cancelled' : needsLook.length ? 'needs a look' : 'done'}`,
+        type: 'basic', iconUrl: 'assets/autosetup128.png', title: `Setup for MID ${mid}: ${signedOut ? 'signed out of Awin' : cancelled ? 'cancelled' : needsLook.length ? 'needs a look' : 'done'}`,
         message: `${summary}.${needsLook.length ? ' ' + needsLook.map(r => `${r.name}: ${r.message}`).join(' ') : ''}`.slice(0, 400)
       });
     } catch { /* notifications are a nicety */ }
-    if (globalThis.TCAUsageWorker) {
-      globalThis.TCAUsageWorker.add({ tool: 'New Implementation', action: 'setup', outcome: needsLook.length || cancelled ? 'failed' : 'success', reason: cancelled ? 'setup-cancelled' : 'setup-page-failed', tc: values.assignedTc });
+    if (globalThis.TCAUsageWorker && !retrying) {   // a retry finishes a setup already counted
+      globalThis.TCAUsageWorker.add({ tool: 'New Implementation', action: 'setup', outcome: needsLook.length || cancelled || signedOut ? 'failed' : 'success', reason: signedOut ? 'setup-signed-out' : cancelled ? 'setup-cancelled' : 'setup-page-failed', tc: values.assignedTc });
     }
     return results;
   }
@@ -240,13 +278,21 @@
   // Is the TC signed in to Awin? Asks for one of the classic setup pages (the server redirects a
   // signed-out browser to Awin's sign-in) and looks at where it ended up. Nothing is changed.
   //   { action: 'tcaSetupCheckSession', mid }  →  { signedIn: true | false | null, detail }
+  // A sign-in form can also come back as a normal 200 on ui.awin.com (as SharePoint's did for Moonfill),
+  // so the page itself is looked at too: a password box or a sign-in form means signed out.
+  const SIGNIN_FORM = /<input[^>]+type=["']?password|<form[^>]+action=["'][^"']*(login|signin|authori[sz]e|oidc|idp)/i;
   async function checkSession(mid) {
     try {
       const res = await fetch(`https://ui.awin.com/provider/migrated-advertiser-settings/${mid}`, { credentials: 'include', redirect: 'follow', cache: 'no-store' });
       const where = new URL(res.url || 'https://ui.awin.com/');
-      if (/login|signin|\/idp\/|authori[sz]e|\/oidc|\/sso/i.test(where.pathname) || where.hostname !== 'ui.awin.com') return { signedIn: false, detail: 'Awin asked to sign in' };
+      if (SIGNIN_PATH.test(where.pathname) || where.hostname !== 'ui.awin.com') return { signedIn: false, detail: 'Awin asked to sign in' };
       if (res.status === 401 || res.status === 403) return { signedIn: false, detail: `Awin answered ${res.status}` };
-      if (res.ok) return { signedIn: true };
+      if (res.ok) {
+        let text = '';
+        try { text = typeof res.text === 'function' ? String(await res.text()).slice(0, 200000) : ''; } catch { /* unreadable: the address is enough */ }
+        if (SIGNIN_FORM.test(text)) return { signedIn: false, detail: 'Awin showed its sign-in form' };
+        return { signedIn: true };
+      }
       return { signedIn: null, detail: `Awin answered ${res.status}` };
     } catch (error) {
       return { signedIn: null, detail: String(error.message || error) };
@@ -257,6 +303,26 @@
     const mid = String(message.mid || '').replace(/\D/g, '');
     if (!mid) { sendResponse({ signedIn: null, detail: 'no MID' }); return undefined; }
     checkSession(mid).then(sendResponse);
+    return true;
+  });
+
+  // "Sign in" on the setup box: brings the tab showing Awin's sign-in to the front, so the TC can sign in
+  // right there. Without that tab (closed, or none known), Awin opens in a new tab.
+  //   { action: 'tcaSetupShowTab', index }  →  { ok, opened? }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'tcaSetupShowTab') return undefined;
+    const tab = last.tabs[Number(message.index)];
+    (async () => {
+      if (tab) {
+        try {
+          const shown = await chrome.tabs.update(tab.id, { active: true });
+          if (chrome.windows) await chrome.windows.update(shown.windowId, { focused: true }).catch(() => {});
+          return { ok: true };
+        } catch { /* closed since */ }
+      }
+      await chrome.tabs.create({ url: 'https://ui.awin.com/', active: true });
+      return { ok: true, opened: true };
+    })().then(sendResponse, error => sendResponse({ ok: false, error: String(error.message || error) }));
     return true;
   });
 
@@ -274,7 +340,7 @@
     if (!mid || !message.values) { sendResponse({ ok: false, error: 'No MID or values.' }); return undefined; }
     if (/^0+$/.test(mid)) { sendResponse({ ok: false, error: 'the MID is 0: the advertiser hasn\'t been created in Awin yet.' }); return undefined; }
     sendResponse({ ok: true });
-    run({ mid, values: message.values, save: !!message.save }, sender && sender.tab ? sender.tab.id : null)
+    run({ mid, values: message.values, save: !!message.save, only: message.only }, sender && sender.tab ? sender.tab.id : null)
       .catch(error => console.error('Moonfill setup failed', error));
     return undefined;
   });
@@ -291,5 +357,5 @@
     return true;
   });
 
-  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST, setEditorInPage, checkSession };   // for tests
+  globalThis.TCASetupRunner = { run, PAGES, T, RELOAD_FIRST, setEditorInPage, checkSession, onSignInPage, last };   // for tests
 })();

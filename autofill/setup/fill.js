@@ -706,11 +706,15 @@
 
   const pageFor = () => PAGES.find(p => p.match.test(root.location.pathname));
 
+  // A sign-in form shown in place of the setup page (a password box), whatever the address says.
+  const signInForm = () => shown('input[type="password"]').length > 0;
+
   async function fillPage(values, save) {
     const page = pageFor();
+    if (signInForm()) return { status: 'signin', message: 'Awin\'s sign-in form is showing.', login: true };
     if (!page) {
       const path = root.location.pathname.replace(/\d{4,}/g, '#');
-      if (/authori[sz]e|login|signin|\/idp\/|\/oidc|\/sso|callback/i.test(path)) return { status: 'signin', message: `Awin's sign-in page is showing (${path}).`, login: /login/i.test(path) };
+      if (/authori[sz]e|login|signin|sign-in|prelogin|\/idp\/|\/oidc|\/sso|callback/i.test(path)) return { status: 'signin', message: `Awin's sign-in page is showing (${path}).`, login: /login/i.test(path) };
       return { status: 'failed', message: `This page isn't one of the setup pages (${path}).` };
     }
     const why = page.skip && page.skip(values);

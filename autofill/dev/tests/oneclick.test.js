@@ -59,7 +59,7 @@ async function open(mock, scenario = 'success', configure, chrome) {
   if (chrome) window.chrome = chrome;
   window.eval(fieldsJs);
   window.eval(configJs);
-  Object.assign(window.TCA_CONFIG, {timeouts: {editMode: 1000, dropdown: 600, save: 1500, readBack: 1000}, pollMs: 20});
+  Object.assign(window.TCA_CONFIG, {timeouts: {editMode: 1000, dropdown: 600, save: 1500, readBack: 1000, draw: 20, lock: 500}, pollMs: 20});
   configure?.(window.TCA_CONFIG);
   window.eval(settingsJs);
   window.eval(templatesJs);
@@ -70,6 +70,7 @@ async function open(mock, scenario = 'success', configure, chrome) {
   return window;
 }
 
+const plain = value => JSON.parse(JSON.stringify(value));
 const opened = [];
 afterEach(() => { for (const w of opened.splice(0)) w.close(); });
 
@@ -719,4 +720,152 @@ test('engine: an optional field in a section the record doesn\'t have is skipped
   const result = await window.TCAEngine.run(window.document, window.TCA_CONFIG, fields, {mode: 'save'});
   assert.equal(result.status, 'saved', result.message);
   assert.match(result.message, /No "SingleView Setup" section found, so its fields were left as they are\./);
+});
+
+// ---------- The checklist needn't have been seen (scrolled to) first ----------
+// Lightning draws a section only once it has been scrolled into view, or in edit mode. Moonfill's
+// Techfill fills the checklist regardless; so does the autofill now.
+
+const pause = (ms = 20) => new Promise(r => setTimeout(r, ms));
+
+test('lightning: a checklist Lightning hasn\'t drawn yet (never scrolled to) is drawn by Fill & save, then filled and saved', async () => {
+  const window = await open('lightning', 'lazy');
+  const ui = panel(window);
+  assert.equal(window.document.querySelectorAll('#app .mock-lazy').length, 2, 'the checklist and SingleView are only placeholders');
+  assert.equal(ui.querySelector('.found').textContent, 'ready');
+  assert.equal(ui.querySelector('.save').disabled, false, 'Fill works without the checklist on the page');
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  assert.equal(key(window, 'Server to server'), 'Yes');
+});
+
+test('lightning: sections drawn only in edit mode: Fill opens edit mode from another section\'s pencil, fills and saves', async () => {
+  const window = await open('lightning', 'lazy-edit');
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  assert.equal(key(window, 'Server to server'), 'Yes');
+  assert.equal(key(window, 'Img tag implemented', 'Commercial Checklist'), 'No', 'the other section is left as it was');
+});
+
+test('lightning: with the Related tab showing, Fill opens the Details tab first', async () => {
+  const window = await open('lightning', 'related-tab');
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  assert.equal(window.document.querySelector('#app a[data-tab-value="detailTab"]').getAttribute('aria-selected'), 'true');
+});
+
+test('lightning: Check page draws a checklist that isn\'t on the page yet, and changes nothing', async () => {
+  const window = await open('lightning', 'lazy');
+  panel(window).querySelector('.check').click();
+  for (let i = 0; i < 150 && !panel(window).querySelector('textarea').value; i++) await pause();
+  const report = panel(window).querySelector('textarea').value;
+  assert.match(report, /Specification labels found: (\d+) of \1\b/);
+  assert.equal(window.mockSaveCount, 0);
+  assert.equal(window.document.querySelector('button[name="SaveEdit"]'), null, 'not in edit mode');
+});
+
+test('engine: never fills while Moonfill is filling the record (the shared edit lock), and waits for it to finish', async () => {
+  const window = await open('lightning');
+  const html = window.document.documentElement;
+  html.dataset.awinEditLock = 'moonfill';
+  const blocked = await window.TCAEngine.run(window.document, window.TCA_CONFIG, window.TCA_FIELDS);
+  assert.equal(blocked.status, 'failed');
+  assert.match(blocked.message, /Moonfill is filling this record/);
+  assert.ok(!window.mockSaveCount);
+  setTimeout(() => delete html.dataset.awinEditLock, 150);
+  const waited = await window.TCAEngine.run(window.document, window.TCA_CONFIG, window.TCA_FIELDS);
+  assert.equal(waited.status, 'saved', waited.message);
+  assert.equal(html.dataset.awinEditLock, undefined, 'released afterwards');
+});
+
+test('engine: a section that isn\'t there even in edit mode: nothing changed, and the edit mode it opened is left again', async () => {
+  const window = await open('lightning', 'lazy-edit');
+  const result = await window.TCAEngine.run(window.document, {...window.TCA_CONFIG, checklistTitle: 'Missing Section'}, [{label: 'Nowhere field', value: 'Yes', excluded: false}]);
+  assert.equal(result.status, 'failed');
+  assert.match(result.message, /"Missing Section" section not found.* Nothing was changed or saved\.$/);
+  assert.equal(window.document.querySelector('button[name="SaveEdit"]'), null, 'edit mode left again');
+  assert.equal(window.mockSaveCount, 0);
+});
+
+// ---------- Menu style: the panel, or the floating button ----------
+
+function orbChrome() {
+  const chrome = withChrome({menuStyle: 'orb'});
+  chrome.local = {};
+  chrome.storage.local = {get: async k => ({[k]: chrome.local[k]}), set: async o => { Object.assign(chrome.local, o); }};
+  return chrome;
+}
+const pointer = (window, el, type, x, y) => el.dispatchEvent(new window.MouseEvent(type, {bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y}));
+
+test('menu style: the panel by default; "orb" in Settings swaps it for the round floating button', async () => {
+  const plainPanel = await open('lightning');
+  assert.equal(panel(plainPanel).querySelector('.orb').hidden, true);
+  assert.equal(panel(plainPanel).querySelector('.start').hidden, true, 'the panel itself is unchanged');
+
+  const window = await open('lightning', 'success', undefined, orbChrome());
+  const ui = panel(window);
+  assert.equal(ui.querySelector('.orb').hidden, false);
+  assert.ok(ui.querySelector('.wrap').classList.contains('orb-mode'));
+  assert.ok(!ui.querySelector('.wrap').classList.contains('open'), 'its menu stays closed until asked for');
+  assert.ok(ui.querySelector('.orb').classList.contains('ready'), 'its dot shows the checklist was found');
+});
+
+test('menu style: a click pins the floating menu open; it can fill the checklist and start Moonfill\'s processes', async () => {
+  const window = await open('lightning', 'success', undefined, orbChrome());
+  const ui = panel(window);
+  const orb = ui.querySelector('.orb');
+  pointer(window, orb, 'pointerdown', 100, 100);
+  pointer(window, orb, 'pointerup', 100, 100);
+  assert.ok(ui.querySelector('.wrap').classList.contains('pinned'), 'a click (no drag) pins the menu open');
+  assert.deepEqual([...ui.querySelectorAll('.start button')].map(b => b.textContent), ['🌙 Scan', '🔎 IR', '🚀 Setup']);
+  const status = await press(window, 'save');
+  assert.equal(status.dataset.state, 'saved', status.textContent);
+  assert.ok(ui.querySelector('.wrap').classList.contains('open'), 'the result stays in view');
+  ui.querySelector('.impl').click();
+  assert.equal(window.moonfillNIClicks, 1, 'the record\'s own 🚀 button was pressed');
+  assert.ok(!ui.querySelector('.wrap').classList.contains('open'), 'the menu closes for the process');
+});
+
+test('menu style: the floating button can be dragged anywhere; its place is remembered, and a drag doesn\'t open the menu', async () => {
+  const chrome = orbChrome();
+  const window = await open('lightning', 'success', undefined, chrome);
+  const ui = panel(window);
+  const orb = ui.querySelector('.orb');
+  assert.equal(orb.style.left, `${window.innerWidth - 44 - 8}px`, 'starts at the bottom right, where the panel sits');
+  const x = parseFloat(orb.style.left) + 10;
+  const y = parseFloat(orb.style.top) + 10;
+  pointer(window, orb, 'pointerdown', x, y);
+  pointer(window, orb, 'pointermove', 310, 210);
+  pointer(window, orb, 'pointerup', 310, 210);
+  assert.ok(!ui.querySelector('.wrap').classList.contains('open'));
+  assert.equal(orb.style.left, '300px');
+  assert.equal(orb.style.top, '200px');
+  const pos = chrome.local.tcaOrbPos;
+  assert.ok(pos && pos.rx > 0 && pos.rx < 1 && pos.ry > 0 && pos.ry < 1, JSON.stringify(pos));
+  pointer(window, orb, 'pointerdown', 310, 210);
+  pointer(window, orb, 'pointermove', -500, 5000);
+  pointer(window, orb, 'pointerup', -500, 5000);
+  assert.equal(orb.style.left, '8px', 'kept on screen');
+  assert.equal(orb.style.top, `${window.innerHeight - 44 - 8}px`);
+});
+
+test('settings: the menu style is kept only when it is "orb" (the panel is the default)', async () => {
+  const window = await open('native');
+  const S = window.TCASettings;
+  assert.deepEqual(plain(S.clean({menuStyle: 'orb'})), {menuStyle: 'orb'});
+  assert.deepEqual(plain(S.clean({menuStyle: 'panel'})), {});
+  assert.deepEqual(plain(S.clean({menuStyle: 'bubble'})), {});
+});
+
+test('settings page: the menu style is saved as soon as it is picked, keeping the other settings', async () => {
+  const chrome = withChrome({fields: {'Server to server': {mode: 'skip'}}});
+  const window = await openOptions(chrome);
+  const radio = value => window.document.querySelector(`input[name="menu-style"][value="${value}"]`);
+  assert.equal(radio('panel').checked, true);
+  radio('orb').checked = true;
+  radio('orb').dispatchEvent(new window.Event('change'));
+  await pause(30);
+  assert.equal(chrome.store.tcaSettings.menuStyle, 'orb');
+  assert.deepEqual(plain(chrome.store.tcaSettings.fields), {'Server to server': {mode: 'skip'}});
+  assert.match(window.document.getElementById('style-status').textContent, /floating button/);
 });

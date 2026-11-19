@@ -213,10 +213,15 @@
       <div class="current" role="status" aria-live="polite">Starting…</div>
       <div class="note sv"></div>
       <div class="note chatter"></div>
+      <div class="warn signin-box" hidden><div class="warn-text signin-text"></div></div>
       <details><summary>Details</summary>
         <ol>${PAGES.map((p, i) => `<li data-index="${i}"><span class="icon">·</span> ${p} <span class="msg"></span></li>`).join('')}</ol>
       </details>
-      <div class="row"><button type="button" class="copy">Copy results</button><button type="button" class="close">Hide</button></div>
+      <div class="row">
+        <button type="button" class="signin-page" hidden>Sign in to Awin</button>
+        <button type="button" class="primary retry" hidden>Retry failed pages</button>
+        <button type="button" class="copy">Copy results</button><button type="button" class="close">Hide</button>
+      </div>
     </div>
   </div>
 </div>
@@ -234,6 +239,7 @@
   let record = { values: null, missing: [], core: false, note: '' };
   let blocked = [];          // MID problems: nothing can run
   let session = null;        // true signed in, false signed out, null unknown, 'checking'
+  let sessionAt = 0;         // when it was last checked
   const manualForm = () => $('form.manual');
   const manualField = name => manualForm().elements[name];
   let shopping = null;   // the site check, once started
@@ -258,6 +264,7 @@
     updateButtons();
     const answer = await ask({ action: 'tcaSetupCheckSession', mid });
     session = answer.signedIn === undefined ? null : answer.signedIn;
+    sessionAt = Date.now();
     if (session === false) {
       $('.session').classList.add('bad');
       $('.session-text').textContent = 'You\'re not signed in to Awin. Sign in, then click Check again.';
@@ -307,16 +314,32 @@
   async function start(save, values = record.values) {
     if (blocked.length || session === false) return;
     for (const b of ['.run', '.fill-only', '.manual-run', '.manual-fill']) $(b).disabled = true;
+    // The box may have been open a while: make sure the Awin session is still there before starting.
+    if (session !== true || Date.now() - sessionAt > SESSION_FRESH) {
+      await checkSession();
+      if (session === false) {
+        if (!manualForm().hidden) { manualForm().hidden = true; $('.ask').hidden = false; }
+        return;
+      }
+    }
     if (shopping) await shopping;   // the Website URL may change for Shopify stores, and Access's query string
     // Details entered by hand for the same site keep the site check's platform result.
     if (values !== record.values && values.landingPage === record.values.landingPage && 'ecommerce' in record.values) values = { ...values, ecommerce: record.values.ecommerce };
     const answer = await ask({ action: 'tcaSetupRun', mid, values, save });
     if (!answer.ok) { $(manualForm().hidden ? '.error' : '.manual-error').textContent = `The setup couldn't start: ${answer.error}`; updateButtons(); return; }
     manualForm().hidden = true;
-    finished = 0;
-    running = true;
     results.length = 0;
-    lastRun = { save, values, mid, siteNote, recordId: (location.pathname.match(/\/TSE__c\/([a-zA-Z0-9]+)/) || [])[1] || '' };
+    svResult = null;
+    lastRun = { save, values, mid, siteNote, retries: 0, recordId: (location.pathname.match(/\/TSE__c\/([a-zA-Z0-9]+)/) || [])[1] || '' };
+    beginProgress(PAGES.map((p, i) => i));
+    setSingleView(values.platformOffer, save);   // on this record tab, while the setup works in its own tabs
+  }
+
+  // The progress view, for a run of the given pages (all ten, or the ones being retried).
+  function beginProgress(pages) {
+    pending = new Set(pages);
+    finished = PAGES.length - pending.size;
+    running = true;
     $('.chatter').textContent = '';
     planPeek();
     hideMini();
@@ -332,10 +355,13 @@
     $('.stop').disabled = false;
     $('.close').textContent = 'Hide';
     $('.current').textContent = 'Starting…';
-    for (const li of shadow.querySelectorAll('li')) { li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = ''; }
-    setBar(0);
+    for (const b of ['.signin-page', '.retry', '.signin-box']) $(b).hidden = true;
+    for (const li of shadow.querySelectorAll('li')) {
+      if (!pending.has(Number(li.dataset.index))) continue;
+      li.removeAttribute('data-status'); li.querySelector('.icon').textContent = '·'; li.querySelector('.msg').textContent = '';
+    }
+    setBar(finished);
     startFire();
-    setSingleView(values.platformOffer, save);   // on this record tab, while the setup works in its own tabs
   }
 
   // Accelerate and Advanced programmes get the record's "SingleView Setup" checklist set at the start
@@ -354,6 +380,7 @@
     } catch (error) {
       result = { status: 'failed', message: error.message };
     }
+    svResult = { status: result.status, message: result.message, values: Object.values(sv.values) };
     note.textContent = result.status === 'saved' ? `✓ ${sv.section} saved on the record (${Object.values(sv.values).join(', ')}).`
       : result.status === 'filled' ? `✎ ${sv.section} filled on the record, not saved: check it, then click Salesforce's Save.`
         : `⚠ ${sv.section} wasn't set: ${result.message}`;
@@ -416,10 +443,18 @@
   let running = false;
   let placing = null;
   const mini = () => $('.mini');
+  // Just above whatever of the Checklist Autofill sits in its way at the bottom right: the docked panel,
+  // or the floating button (and its open menu) when it has been left there.
   function placeMini() {
-    const panel = document.getElementById('tca-root') && document.getElementById('tca-root').shadowRoot && document.getElementById('tca-root').shadowRoot.querySelector('.panel');
-    const top = panel ? panel.getBoundingClientRect().top : 0;
-    mini().style.bottom = `${top > 0 ? Math.max(16, window.innerHeight - top + 8) : 64}px`;
+    const ui = document.getElementById('tca-root') && document.getElementById('tca-root').shadowRoot;
+    const left = window.innerWidth - 16 - 340;
+    let bottom = 16;
+    for (const el of ui ? [...ui.querySelectorAll('.panel, .orb')] : []) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || r.right < left || r.top <= 0) continue;
+      bottom = Math.max(bottom, window.innerHeight - r.top + 8);
+    }
+    mini().style.bottom = `${bottom}px`;
   }
   function showMini() {
     mini().hidden = false;
@@ -437,16 +472,20 @@
   function progress(update) {
     if (update.done) {
       running = false;
-      $('.current').textContent = update.error || `${update.cancelled ? 'Cancelled' : 'Finished'}: ${update.summary}.`;
-      setMiniLabel(update.error ? 'Setup couldn\'t run' : `Setup ${update.cancelled ? 'cancelled' : update.needsLook ? 'finished: needs a look' : 'finished'}: ${update.summary}`);
-      $('.mini').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
+      const c = counts();
+      const summary = update.error ? '' : summaryLine(c);
+      const attention = c.needsLook || c.notStarted || update.error;
+      $('.current').textContent = update.error || (update.signedOut ? `Stopped: Awin signed you out. ${summary}.` : `${update.cancelled ? 'Cancelled' : 'Finished'}: ${summary}.`);
+      setMiniLabel(update.error ? 'Setup couldn\'t run' : `Setup ${update.signedOut ? 'stopped: sign in to Awin' : update.cancelled ? 'cancelled' : c.needsLook ? 'finished: needs a look' : 'finished'}: ${summary}`);
+      $('.mini').classList.add(attention ? 'attention' : 'done');
       $('.mini-stop').hidden = true;
       $('.dismiss').hidden = false;
       $('.stop').hidden = true;
       $('.close').textContent = 'Close';
-      $('.progress').classList.add(update.needsLook || update.cancelled || update.error ? 'attention' : 'done');
-      if (!update.cancelled) setBar(PAGES.length);
+      $('.progress').classList.add(attention ? 'attention' : 'done');
+      if (!update.cancelled && !update.signedOut) setBar(PAGES.length);
       stopFire();
+      offerRetry(update);
       // A summary for the record's Chatter, when something was saved (Run and save only).
       if (!update.error && lastRun && lastRun.save && results.some(r => r && r.status === 'saved')) postSummary(update);
       return;
@@ -462,41 +501,122 @@
       setMiniLabel(`Setup: ${PAGES[update.index]}…`);
     } else {
       results[update.index] = update;
-      finished = Math.max(finished, update.index + 1);
+      pending.delete(update.index);
+      finished = PAGES.length - pending.size;
       setBar(finished);
       maybePeek();
     }
   }
 
+  // ---------- after a run: sign in, and retry the pages that didn't work ----------
+  const RETRY = new Set(['failed', 'unconfirmed', 'cancelled']);
+  const retryable = () => PAGES.map((p, i) => i).filter(i => !results[i] || RETRY.has(results[i].status));
+  const signInPage = () => results.findIndex(r => r && r.signin);
+  function offerRetry(update) {
+    if (!lastRun || update.error) return;
+    const signin = signInPage();
+    const signinShown = signin >= 0 || !!update.signedOut;
+    $('.signin-page').hidden = !signinShown;
+    $('.signin-box').hidden = !signinShown;
+    $('.signin-text').textContent = update.signedOut
+      ? 'Awin signed you out during the setup, so it stopped. Click Sign in to Awin, sign in there, then come back and click Retry failed pages.'
+      : `Awin asked you to sign in on ${signin >= 0 ? PAGES[signin] : 'a page'}. Click Sign in to Awin to sign in there, then Retry failed pages.`;
+    const retry = $('.retry');
+    retry.hidden = !retryable().length;
+    retry.disabled = false;
+    retry.textContent = `Retry failed pages (${retryable().length})`;
+  }
+  async function showSignIn() {
+    const i = signInPage();
+    await ask({ action: 'tcaSetupShowTab', index: i >= 0 ? i : retryable()[0] });
+  }
+  async function retryFailed() {
+    const only = retryable();
+    if (!only.length || running || !lastRun) return;
+    $('.retry').disabled = true;
+    $('.current').textContent = 'Checking you\'re signed in to Awin…';
+    await checkSession();
+    if (session === false) {
+      $('.current').textContent = 'You\'re still signed out of Awin: click Sign in to Awin, sign in, then Retry failed pages.';
+      $('.signin-page').hidden = false;
+      $('.retry').disabled = false;
+      return;
+    }
+    const answer = await ask({ action: 'tcaSetupRun', mid: lastRun.mid, values: lastRun.values, save: lastRun.save, only });
+    if (!answer.ok) { $('.current').textContent = `The retry couldn't start: ${answer.error}`; $('.retry').disabled = false; return; }
+    lastRun.retries++;
+    for (const i of only) results[i] = undefined;
+    beginProgress(only);
+    $('.current').textContent = `Retrying ${only.length} page${only.length === 1 ? '' : 's'}…`;
+  }
+
   // ---------- a summary of the run, posted to the record's Chatter ----------
   // Moonfill's own Chatter code posts it (moonfillPost, in this tab), through the background script.
   // Chatter is only drawn while the page is showing, so a hidden tab waits until the TC comes back.
-  const results = [];   // each page's last result this run
-  let lastRun = null;   // { save, values, mid, recordId }
-  function pageLine(r, i) {
-    const message = String((r && r.message) || '').replace(/\.$/, '');
-    const what = !r ? 'not started'
-      : r.status === 'saved' ? (/^Already up to date/i.test(message) ? 'already up to date' : 'saved')
-        : r.status === 'skipped' ? `skipped (${message.replace(/^Skipped:\s*/i, '')})`
-          : r.status === 'filled' ? 'filled, not saved'
-            : r.status === 'cancelled' ? 'not started (cancelled)'
-              : `needs a look: ${message}`;
-    const v = lastRun.values;
-    const detail = i === 2 && r && r.status === 'saved' && v.transactionType ? ` (${v.transactionType}, ${v.commissionType}, ${v.publisherCommission}${v.commissionType === 'Percentage' ? '%' : ''})` : '';
-    return `${(r && ICON[r.status]) || '·'} ${PAGES[i]}: ${what}${detail}`;
+  const results = [];   // each page's latest result (a retry replaces the pages it redoes)
+  let lastRun = null;   // { save, values, mid, recordId, retries }
+  let svResult = null;  // the SingleView Setup outcome, for the summary
+  let pending = new Set();   // pages of the current run without a result yet
+  const COMMISSION = 2;
+  const ADVERTISER = 8;
+  const SESSION_FRESH = 60000;   // a sign-in check older than this is done again before a run
+
+  function counts() {
+    const c = { saved: 0, filled: 0, skipped: 0, needsLook: 0, notStarted: 0 };
+    PAGES.forEach((p, i) => {
+      const r = results[i];
+      if (!r || r.status === 'cancelled') c.notStarted++;
+      else if (r.status === 'failed' || r.status === 'unconfirmed') c.needsLook++;
+      else if (c[r.status] !== undefined) c[r.status]++;
+    });
+    return c;
+  }
+  const summaryLine = c => [c.saved && `${c.saved} saved`, c.filled && `${c.filled} filled (not saved)`, c.skipped && `${c.skipped} skipped`,
+    c.needsLook && `${c.needsLook} need${c.needsLook === 1 ? 's' : ''} a look`, c.notStarted && `${c.notStarted} not started`].filter(Boolean).join(', ') || 'nothing done';
+  const short = text => { const s = String(text || '').replace(/\s+/g, ' ').replace(/\.$/, '').trim(); return s.length > 90 ? `${s.slice(0, 87)}…` : s; };
+
+  // A value as it ended up on its page: the value when saved, otherwise what happened to it.
+  function outcome(i, value) {
+    const r = results[i];
+    if (!r || r.status === 'cancelled') return `not set (${PAGES[i]} wasn't done)`;
+    if (r.status === 'saved') return value;
+    if (r.status === 'filled') return `${value} (filled, not saved)`;
+    if (r.status === 'skipped') return `not set (${short(r.message.replace(/^Skipped:\s*/i, ''))})`;
+    return `${value}, but ${PAGES[i]} needs a look`;
+  }
+  function commissionLine(v) {
+    if (v.commissionSkip) return `not set automatically (${short(v.commissionSkip.replace(/: set the commission group by hand$/i, ''))})`;
+    if (v.commissionProblem) return `not set (${short(v.commissionProblem.replace(/, so the commission group wasn't set\.?$/i, ''))})`;
+    return outcome(COMMISSION, `${v.transactionType}, ${v.commissionType}, ${v.publisherCommission}${v.commissionType === 'Percentage' ? '%' : ''}`);
+  }
+  function validationLine(v) {
+    const r = results[ADVERTISER];
+    const kept = r && /already set \(([^)]*)\)/i.exec(`${r.note || ''} ${r.message || ''}`);
+    if (kept) return `${kept[1]} days (already set, kept)`;
+    if (!/^\d+$/.test(String(v.validationDays))) return 'not set (Auto validation period is empty on the record)';
+    return outcome(ADVERTISER, v.platformOffer === 'Access' ? `${+v.validationDays + 7} days (${v.validationDays} + 7 for Access)` : `${v.validationDays} days`);
   }
   function summaryText(update) {
     let tool = 'AutoSetup';
     try { const m = chrome.runtime.getManifest(); tool = `${m.name} v${m.version_name || m.version}`; } catch { /* tests */ }
-    const offer = lastRun.values.platformOffer;
+    const v = lastRun.values;
+    const c = counts();
+    const look = PAGES.map((p, i) => i).filter(i => results[i] && (results[i].status === 'failed' || results[i].status === 'unconfirmed'));
+    const notStarted = PAGES.filter((p, i) => !results[i] || results[i].status === 'cancelled');
+    const sv = svResult && (svResult.status === 'saved' ? svResult.values.join(', ') : svResult.status === 'filled' ? 'filled, not saved' : `not set (${short(svResult.message)})`);
     return [
-      `🚀 Programme setup${lastRun.mid ? ` for MID ${lastRun.mid}` : ''}${offer ? ` (${offer})` : ''}: ${update.cancelled ? 'cancelled' : update.needsLook ? 'done, some pages need a look' : 'done'}`,
-      `${update.summary}.`,
-      ...PAGES.map((p, i) => pageLine(results[i], i)),
-      $('.sv').textContent,
-      lastRun.siteNote && `Site check: ${lastRun.siteNote}`,
+      `New Implementation setup${lastRun.mid ? ` for MID ${lastRun.mid}` : ''}${v.platformOffer ? ` (${v.platformOffer})` : ''}${lastRun.retries ? ', after a retry' : ''}`,
+      '',
+      `Default commission group: ${commissionLine(v)}`,
+      `Validation period: ${validationLine(v)}`,
+      '',
+      `Pages: ${summaryLine(c)}${update.signedOut ? ' (Awin signed out during the setup)' : update.cancelled ? ' (cancelled)' : ''}.`,
+      look.length && `Needs a look: ${look.map(i => `${PAGES[i]} (${short(results[i].message)})`).join('; ')}.`,
+      notStarted.length && `Not started: ${notStarted.join(', ')}.`,
+      sv && `SingleView Setup: ${sv}.`,
+      '',
       `Posted by ${tool}.`
-    ].filter(Boolean).join('\n');
+    ].filter(line => line !== false && line !== 0 && line !== null && line !== undefined).join('\n').replace(/\n{3,}/g, '\n\n');
   }
   function postSummary(update) {
     const note = $('.chatter');
@@ -563,6 +683,8 @@
   $('.manual-run').addEventListener('click', () => startManual(true));
   $('.manual-fill').addEventListener('click', () => startManual(false));
   $('.signin').addEventListener('click', () => window.open('https://ui.awin.com/', '_blank'));
+  $('.signin-page').addEventListener('click', showSignIn);
+  $('.retry').addEventListener('click', retryFailed);
   $('.recheck').addEventListener('click', checkSession);
 
   const close = () => { $('.backdrop').hidden = true; };
@@ -602,5 +724,5 @@
   } catch { /* no extension messaging (tests) */ }
 
   (document.body || document.documentElement).appendChild(host);
-  globalThis.TCASetupForm = { open, start, progress, readRecord, openManual };
+  globalThis.TCASetupForm = { open, start, progress, readRecord, openManual, retryFailed, summaryText: update => summaryText(update || {}) };
 })();

@@ -44,9 +44,10 @@
     'scan-interrupted': 'Posting the scan result was interrupted',
     'tabs-failed': "Tabs couldn't be opened",
     'setup-page-failed': 'A setup page needed a look',
-    'setup-cancelled': 'Setup cancelled'
+    'setup-cancelled': 'Setup cancelled',
+    'setup-signed-out': 'Signed out of Awin during a setup'
   };
-  const CODES = new Set(['unconfirmed', 'tabs-failed', 'setup-page-failed', 'setup-cancelled', 'other', ...REASONS.map(([code]) => code)]);
+  const CODES = new Set(['unconfirmed', 'tabs-failed', 'setup-page-failed', 'setup-cancelled', 'setup-signed-out', 'other', ...REASONS.map(([code]) => code)]);
 
   function reasonCode(reason) {
     const text = String(reason ?? '').trim();

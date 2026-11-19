@@ -206,13 +206,105 @@
   }
 
   // Expand the checklist if it is collapsed (a display toggle only; no data changes).
-  async function expandChecklist(doc, cfg) {
-    const found = findChecklist(doc, cfg);
+  async function expandChecklist(doc, cfg, labels = []) {
+    const found = locate(doc, cfg, labels);
     if (!found.collapsed) return found.section;
     collapsedToggle(found.section, cfg).click();
-    const open = await waitFor(() => { try { const f = findChecklist(doc, cfg); return f.collapsed ? null : f.section; } catch { return null; } }, cfg.timeouts.editMode, cfg.pollMs);
+    const open = await waitFor(() => { try { const f = locate(doc, cfg, labels); return f.collapsed ? null : f.section; } catch { return null; } }, cfg.timeouts.editMode, cfg.pollMs);
     if (!open) throw new StopError(`Couldn't expand the "${cfg.checklistTitle}" section.`);
     return open;
+  }
+
+  // ---------- Getting the record's sections onto the page ----------
+  // Lightning only draws a section once it has been scrolled into view (or the form is in edit mode),
+  // so a record opened at the top may not have its Technical Checklist or SingleView Setup on the page
+  // yet. Moonfill's Techfill (github.com/OptimusRodier/moonfill) works the same way round: open the
+  // Details tab, expand what's collapsed, and let edit mode draw the rest.
+
+  // The section a list of fields lives in, when no section carries the expected title (the record's
+  // layout may name it differently): the one section holding all of those labels, or null.
+  function sectionByFields(doc, cfg, labels) {
+    const S = cfg.selectors;
+    const want = new Set(labels.map(norm));
+    if (!want.size) return null;
+    const found = new Map();
+    for (const labelEl of all(activeRoot(doc, cfg), S.label)) {
+      const label = norm(cleanText(labelEl, S.labelNoise));
+      if (!want.has(label) || !visible(labelEl) || closest(labelEl, '#tca-root')) continue;
+      const section = closest(labelEl, S.section);
+      if (section) found.set(label, section);
+    }
+    const sections = new Set(found.values());
+    return found.size === want.size && sections.size === 1 ? [...sections][0] : null;
+  }
+
+  // findChecklist, falling back to the fields' own section when no section has the title. A title
+  // found more than once is still refused (never a guess).
+  function locate(doc, cfg, labels = []) {
+    try { return findChecklist(doc, cfg); } catch (error) {
+      if (/expected exactly one/.test(error.message)) throw error;
+      const section = sectionByFields(doc, cfg, labels);
+      if (!section) throw error;
+      return { section, title: null, collapsed: false };
+    }
+  }
+
+  const detailsTab = (doc, cfg) => all(activeRoot(doc, cfg), 'a[data-tab-value="detailTab"]').find(visible) || null;
+
+  // The record's Details tab, opened if another tab (Related, Chatter…) is showing.
+  async function openDetailsTab(doc, cfg) {
+    const tab = detailsTab(doc, cfg);
+    if (!tab || tab.getAttribute('aria-selected') === 'true') return;
+    clickLikeUser(tab);
+    await waitFor(() => tab.getAttribute('aria-selected') === 'true', cfg.timeouts.editMode, cfg.pollMs);
+    await sleep(300);
+  }
+
+  // Scroll down the record (and back) so Lightning draws the sections below the fold, expanding any
+  // collapsed ones on the way. A display change only. Stops as soon as done() is true, or once the
+  // page stops growing.
+  async function drawMore(doc, cfg, done = () => false) {
+    const S = cfg.selectors;
+    const scroller = doc.scrollingElement || doc.documentElement;
+    const start = scroller.scrollTop;
+    const pause = (cfg.timeouts && cfg.timeouts.draw) || 350;
+    let last = -1;
+    let still = 0;
+    try {
+      for (let round = 0; round < 12 && !done(); round++) {
+        const page = activeRoot(doc, cfg);
+        for (const b of all(page, S.sectionToggle)) if (b.getAttribute('aria-expanded') === 'false' && visible(b) && !closest(b, '#tca-root')) b.click();
+        const sections = all(page, S.section).filter(visible);
+        // Empty sections first (Lightning's placeholders for what it hasn't drawn), then the end of the page.
+        const targets = [...sections.filter(s => !fieldItems(s, cfg).length && !collapsedToggle(s, cfg)), sections[sections.length - 1]].filter(Boolean);
+        for (const el of targets) if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+        scroller.scrollTop += (doc.defaultView && doc.defaultView.innerHeight) || 800;
+        await sleep(pause);
+        const count = all(page, S.label).length;
+        still = count === last ? still + 1 : 0;
+        if (still >= 2) break;
+        last = count;
+      }
+    } finally {
+      scroller.scrollTop = start;
+    }
+    return done();
+  }
+
+  // Display-only preparation for a read: the Details tab, and the named sections drawn if they aren't yet.
+  async function reveal(doc, cfg, titles = [cfg.checklistTitle]) {
+    await openDetailsTab(doc, cfg);
+    const shown = () => titles.every(title => { try { locate(doc, title === cfg.checklistTitle ? cfg : { ...cfg, checklistTitle: title }); return true; } catch { return false; } });
+    return shown() || drawMore(doc, cfg, shown);
+  }
+
+  // A pencil that opens edit mode for the whole Details form: inside the Details tab when there is one,
+  // and inside a record section (never the Key Fields box at the top, which edits only itself).
+  function anyPencil(doc, cfg) {
+    const tab = detailsTab(doc, cfg);
+    const panelId = tab && tab.getAttribute('aria-controls');
+    const panel = (panelId && doc.getElementById(panelId)) || activeRoot(doc, cfg);
+    return all(panel, cfg.selectors.editButton).find(b => visible(b) && closest(b, cfg.selectors.section) && !closest(b, '#tca-root')) || null;
   }
 
   function rowFor(section, cfg, label) {
@@ -381,56 +473,119 @@
 
   // ---------- Fill (and optionally save) ----------
 
+  // One writer at a time on the record: Moonfill's scan-field fill (salesforce.js) waits while this
+  // attribute is set by anyone else, and a run here waits while Moonfill (or another run) holds it.
+  const LOCK = 'awinEditLock';
+
   // opts.mode: 'save' (default) clicks Salesforce's Save; 'fill' stops before Save.
   async function run(doc, cfg, fields, opts = {}) {
     const S = cfg.selectors;
     const mode = opts.mode || 'save';
     let changed = 0;
     let inEditMode = false;
+    let ownEdit = false;   // this run opened edit mode itself (so it may leave it again if nothing changed)
     const notes = [];
     const withNotes = message => [message, ...notes].join(' ');
-    const fail = message => ({
-      status: 'failed',
-      message: changed ? `${message} ${changed} field(s) were changed but NOT saved — click Cancel to discard.`
-        : inEditMode ? `${message} Nothing was changed or saved; click Cancel to leave edit mode.` : `${message} Nothing was changed or saved.`,
-      changed
-    });
+    const cancelOwnEdit = () => {
+      const cancel = all(doc, 'button[name="CancelEdit"]').find(visible);
+      if (!cancel) return false;
+      cancel.click();
+      return true;
+    };
+    const fail = message => {
+      // Nothing was changed in an edit mode this run opened: leave it again, as if nothing happened.
+      const left = !changed && ownEdit && isEditing(doc, cfg) && cancelOwnEdit();
+      return {
+        status: 'failed',
+        message: changed ? `${message} ${changed} field(s) were changed but NOT saved — click Cancel to discard.`
+          : inEditMode && !left ? `${message} Nothing was changed or saved; click Cancel to leave edit mode.` : `${message} Nothing was changed or saved.`,
+        changed
+      };
+    };
 
+    const html = doc.documentElement;
+    const token = `checklist-${Math.random().toString(36).slice(2, 8)}`;
     try {
+      const free = await waitFor(() => !html.dataset[LOCK], (cfg.timeouts && cfg.timeouts.lock) || 30000, 250);
+      if (!free) throw new StopError(html.dataset[LOCK] === 'moonfill' ? 'Moonfill is filling this record from a Moonpull scan: try again in a few seconds.' : 'Another fill is still working on this record: try again when it has finished.');
+      html.dataset[LOCK] = token;
+
+      // Clean baseline: Save commits the whole page, so unrelated unsaved edits would be saved with ours.
+      if (isEditing(doc, cfg)) throw new StopError('The record is already in edit mode. Save or cancel your own edits first.');
       let targets = resolveTargets(doc, cfg, fields, notes);
       // A field may belong to another section of the record (field.section, e.g. "SingleView Setup");
       // the rest are in the Technical Checklist. A missing optional section is skipped with a note.
       const titleOf = f => f.section || cfg.checklistTitle;
       const cfgFor = title => (title === cfg.checklistTitle ? cfg : { ...cfg, checklistTitle: title });
+      const labelsOf = title => targets.filter(f => titleOf(f) === title).map(f => f.label);
+      const titles = [cfg.checklistTitle, ...new Set(targets.map(titleOf).filter(t => t !== cfg.checklistTitle))];
+      const required = title => title === cfg.checklistTitle || !targets.filter(f => titleOf(f) === title).every(f => f.optional);
       const sections = {};
-      for (const title of [cfg.checklistTitle, ...new Set(targets.map(titleOf).filter(t => t !== cfg.checklistTitle))]) {
-        try { sections[title] = await expandChecklist(doc, cfgFor(title)); } catch (error) {
-          if (title === cfg.checklistTitle || !targets.filter(f => titleOf(f) === title).every(f => f.optional)) throw error;
-          notes.push(`No "${title}" section found, so its fields were left as they are.`);
+      const errors = {};
+      const find = async () => {
+        for (const title of titles) {
+          if (sections[title] && sections[title].isConnected && visible(sections[title])) continue;
+          try { sections[title] = await expandChecklist(doc, cfgFor(title), labelsOf(title)); delete errors[title]; } catch (error) {
+            if (/expected exactly one/.test(error.message)) throw error;
+            sections[title] = null;
+            errors[title] = error;
+          }
         }
-      }
-      targets = targets.filter(f => sections[titleOf(f)]);
+        return titles.every(t => sections[t]);
+      };
+      const allRows = () => titles.every(title => !sections[title] || labelsOf(title).every(label => { try { rowFor(current(title), cfg, label); return true; } catch { return false; } }));
+
+      // The sections may not be drawn yet (the record was never scrolled down to them): the Details
+      // tab, collapsed sections and lazy drawing first; if they still aren't there, edit mode draws them.
+      await openDetailsTab(doc, cfg);
+      if (!(await find())) await drawMore(doc, cfg, () => titles.every(t => { try { locate(doc, cfgFor(t), labelsOf(t)); return true; } catch { return false; } }));
+      await find();
+
       const current = (title = cfg.checklistTitle) => {
         const s = sections[title];
-        return s.isConnected && visible(s) ? s : (sections[title] = findChecklist(doc, cfgFor(title)).section);
+        if (s && s.isConnected && visible(s)) return s;
+        return (sections[title] = locate(doc, cfgFor(title), labelsOf(title)).section);
       };
       const control = field => { const item = rowFor(current(titleOf(field)), cfg, field.label); return { item, ...controlFor(item, cfg, field.label) }; };
 
-      // Clean baseline: Save commits the whole page, so unrelated unsaved edits would be saved with ours.
-      if (isEditing(doc, cfg)) throw new StopError('The record is already in edit mode. Save or cancel your own edits first.');
-      const items = targets.filter(f => titleOf(f) === cfg.checklistTitle).map(f => rowFor(current(), cfg, f.label));
-      for (const f of targets) rowFor(current(titleOf(f)), cfg, f.label);   // every field is there before anything starts
-
-      // Enter edit mode through a pencil inside the Technical Checklist only.
-      const pencil = items.map(i => all(i, S.editButton).filter(visible)).find(p => p.length === 1);
-      if (!pencil) throw new StopError('No edit (pencil) button found on the checklist fields.');
-      pencil[0].click();
+      // Enter edit mode, through a pencil inside the Technical Checklist when it's on the page (as
+      // before), otherwise through any pencil in the record's sections (edit mode draws every section).
+      const checklistPencil = () => {
+        if (!sections[cfg.checklistTitle]) return null;
+        const items = labelsOf(cfg.checklistTitle).map(label => { try { return rowFor(current(), cfg, label); } catch { return null; } }).filter(Boolean);
+        const pencil = items.map(i => all(i, S.editButton).filter(visible)).find(p => p.length === 1);
+        return pencil ? pencil[0] : null;
+      };
+      if (sections[cfg.checklistTitle] && titles.every(t => sections[t] || !required(t))) {
+        for (const label of labelsOf(cfg.checklistTitle)) rowFor(current(), cfg, label);   // every field is there before anything starts
+      }
+      const pencil = checklistPencil() || anyPencil(doc, cfg);
+      if (!pencil) {
+        const missing = titles.find(t => !sections[t] && required(t));
+        throw missing ? errors[missing] : new StopError('No edit (pencil) button found on the checklist fields.');
+      }
+      pencil.click();
       inEditMode = true;
+      ownEdit = true;
       const ready = await waitFor(() => {
         if (!isEditing(doc, cfg)) return null;
-        try { return all(rowFor(current(), cfg, targets[0].label), `${S.combobox}, ${S.native}`).some(visible); } catch { return null; }
+        return titles.every(t => { try { locate(doc, cfgFor(t), labelsOf(t)); return true; } catch { return !required(t); } }) || null;
       }, cfg.timeouts.editMode, cfg.pollMs);
-      if (!ready) throw new StopError('Edit mode did not open.');
+      if (!isEditing(doc, cfg)) throw new StopError('Edit mode did not open.');
+      if (!ready) await drawMore(doc, cfg, () => titles.every(t => { try { locate(doc, cfgFor(t), labelsOf(t)); return true; } catch { return false; } }));
+      for (const t of titles) sections[t] = null;
+      await find();
+      await waitFor(() => allRows() || null, cfg.timeouts.editMode, cfg.pollMs);
+      for (const title of titles) {
+        if (sections[title]) continue;
+        if (required(title)) throw errors[title] || new StopError(`"${title}" section not found on this page.`);
+        notes.push(`No "${title}" section found, so its fields were left as they are.`);
+      }
+      targets = targets.filter(f => sections[titleOf(f)]);
+      if (!targets.length) throw new StopError('There is nothing to fill on this record.');
+      for (const f of targets) rowFor(current(titleOf(f)), cfg, f.label);   // every field is there before anything is written
+      const ok = await waitFor(() => { try { return all(rowFor(current(titleOf(targets[0])), cfg, targets[0].label), `${S.combobox}, ${S.native}`).some(visible); } catch { return null; } }, cfg.timeouts.editMode, cfg.pollMs);
+      if (!ok) throw new StopError('Edit mode did not open.');
       await sleep(400);
 
       // Check every field before writing any (picklist options are only listed once opened, below).
@@ -444,7 +599,7 @@
         if (field.onlyIfEmpty && !isBlank(readAny(c.el, cfg))) { notes.push(`${field.label} already had a value, so it was kept.`); continue; }
         writes.push(field);
       }
-      const targetMap = () => Object.keys(sections).map(title => [current(title), title, new Set(writes.filter(f => titleOf(f) === title).map(f => norm(f.label)))]);
+      const targetMap = () => Object.keys(sections).filter(title => sections[title]).map(title => [current(title), title, new Set(writes.filter(f => titleOf(f) === title).map(f => norm(f.label)))]);
       const before = snapshot(doc, cfg, targetMap());
 
       for (const field of writes) {
@@ -480,7 +635,7 @@
       if (outcome.error) return { status: 'failed', message: `Salesforce did not save: ${outcome.error} Your ${changed} change(s) are still unsaved on the page.`, changed };
 
       // Read the saved values back from the record.
-      const wrongNow = () => { try { return writes.filter(f => !shows(f, viewValue(rowFor(findChecklist(doc, cfgFor(titleOf(f))).section, cfg, f.label), cfg), cfg)); } catch { return writes; } };
+      const wrongNow = () => { try { return writes.filter(f => !shows(f, viewValue(rowFor(locate(doc, cfgFor(titleOf(f)), labelsOf(titleOf(f))).section, cfg, f.label), cfg), cfg)); } catch { return writes; } };
       const settled = await waitFor(() => (wrongNow().length ? null : true), cfg.timeouts.readBack, cfg.pollMs);
       if (!settled) {
         const wrong = wrongNow();
@@ -490,6 +645,8 @@
     } catch (error) {
       if (error instanceof StopError) return fail(error.message);
       return fail(`Unexpected error: ${error.message}.`);
+    } finally {
+      if (html.dataset[LOCK] === token) delete html.dataset[LOCK];
     }
   }
 
@@ -581,7 +738,7 @@
     return lines.join('\n');
   }
 
-  root.TCAEngine = { planTargets, findChecklist, fieldItems, run, checkPage, isEditing, all, parseDate, formatDate, createdDate, todayIso, landingPageUrl, recordField, assignedTc,
+  root.TCAEngine = { planTargets, findChecklist, locate, fieldItems, run, checkPage, reveal, isEditing, all, parseDate, formatDate, createdDate, todayIso, landingPageUrl, recordField, assignedTc,
     // Shadow-DOM aware helpers, shared with the programme setup pages (setup/fill.js).
     dom: { all, cleanText, visible, closest, norm, describe, parentOf, setNative, clickLikeUser, waitFor, sleep } };
 })(globalThis);

@@ -8,6 +8,8 @@
   // 'created' / 'today' = the record's creation date / today's date (only if the field is empty).
   const MODES = ['skip', 'value', 'created', 'today'];
   const DATE_FORMATS = ['DD/MM/YYYY', 'MM/DD/YYYY'];
+  // How the Checklist Autofill shows on Salesforce: the docked panel, or the round floating button.
+  const MENU_STYLES = ['panel', 'orb'];
 
   const storage = () => (root.chrome && root.chrome.storage && root.chrome.storage.sync) || null;
 
@@ -29,6 +31,7 @@
     const out = {};
     if (!settings || typeof settings !== 'object') return out;
     if (DATE_FORMATS.includes(settings.dateFormat)) out.dateFormat = settings.dateFormat;
+    if (settings.menuStyle === 'orb') out.menuStyle = 'orb';   // 'panel' is the default, so it isn't stored
     const fields = {};
     for (const [label, o] of Object.entries(settings.fields || {})) {
       if (!o || !MODES.includes(o.mode)) continue;
@@ -71,5 +74,5 @@
     if (changed) changed.addListener((changes, area) => { if (area === 'sync' && changes[KEY]) callback(); });
   }
 
-  root.TCASettings = { load, save, clean, apply, describe, onChange, DATE_FORMATS };
+  root.TCASettings = { load, save, clean, apply, describe, onChange, DATE_FORMATS, MENU_STYLES };
 })(globalThis);
