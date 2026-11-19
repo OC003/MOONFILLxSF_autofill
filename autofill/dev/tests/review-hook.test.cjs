@@ -253,3 +253,13 @@ test("settings: the review's region paths and history, in its own block", async 
   assert.match(d.getElementById("oir-cleared").textContent, /1 review\(s\) removed/);
   w.close();
 });
+
+test("IR hook: open() starts the review without Moonfill's button (the floating button's 🔎 IR)", () => {
+  let p = record(`https://awin.lightning.force.com/lightning/r/TSE__c/${REC}/view`);
+  p.w.document.getElementById("moonfillSalesforceSection").remove();
+  assert.equal(p.w.OIRHook.open(), true);
+  assert.deepEqual(p.sent, [{ action: "oirOpenPanel", mid: "131530" }]);
+  p = record("https://awin.lightning.force.com/lightning/r/Case/5003X00002abcdeQAA/view");
+  assert.equal(p.w.OIRHook.open(), false, "not on a Case page");
+  assert.deepEqual(p.sent, []);
+});

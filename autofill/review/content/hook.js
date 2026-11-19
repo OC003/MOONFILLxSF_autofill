@@ -28,5 +28,13 @@
     } catch (e) { /* extension reloaded: the page needs a refresh */ }
   }, true);
 
-  globalThis.OIRHook = { readMid };
+  // Opens the review panel for this record without Moonfill's button (the floating button's 🔎 IR).
+  // false when this isn't an Implementation record.
+  function open() {
+    if (!RECORD.test(location.pathname)) return false;
+    try { chrome.runtime.sendMessage({ action: 'oirOpenPanel', mid: readMid() }).catch(() => {}); } catch (e) { return false; }
+    return true;
+  }
+
+  globalThis.OIRHook = { readMid, open };
 })();

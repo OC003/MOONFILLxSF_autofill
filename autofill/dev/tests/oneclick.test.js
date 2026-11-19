@@ -886,3 +886,30 @@ test('menu style: with the floating button, Moonfill\'s own row of buttons is mo
   assert.equal(hiding(), null, 'shown again with the panel');
   assert.equal(panel(window).querySelector('.orb').hidden, true);
 });
+
+test('menu style: the menu still presses Moonfill\'s buttons when the browser counts the hidden row as not visible', async () => {
+  const chrome = orbChrome();
+  const window = await open('lightning', 'success', undefined, chrome);
+  // as in Chrome, where checkVisibility() can say no for the row moved off screen
+  window.HTMLElement.prototype.checkVisibility = function () { return !this.closest('#moonfillSalesforceSection'); };
+  panel(window).querySelector('.impl').click();
+  assert.equal(window.moonfillNIClicks, 1, 'the record\'s own 🚀 was pressed');
+  assert.doesNotMatch(panel(window).textContent, /isn't on this record yet/);
+});
+
+test('menu style: without Moonfill\'s row, 🚀 Setup and 🔎 IR start by themselves; 🌙 Scan says why it can\'t', async () => {
+  const chrome = orbChrome();
+  const window = await open('lightning', 'success', undefined, chrome);
+  window.document.getElementById('moonfillSalesforceSection').remove();
+  let setups = 0, reviews = 0;
+  window.TCASetupForm = { open: async () => { setups++; } };
+  window.OIRHook = { open: () => { reviews++; return true; } };
+  const ui = panel(window);
+  ui.querySelector('.impl').click();
+  ui.querySelector('.ir').click();
+  assert.equal(setups, 1, 'the setup box opened');
+  assert.equal(reviews, 1, 'the review panel was asked for');
+  ui.querySelector('.moon').click();
+  await pause(30);
+  assert.match(ui.textContent, /Moonfill's Moonpull scan button isn't on this record yet/);
+});

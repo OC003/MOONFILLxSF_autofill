@@ -368,13 +368,27 @@
 
   // Moonfill's processes, started from the floating menu by pressing its own buttons on the record,
   // so they run exactly as they do from there (🚀 opens the New Implementation setup).
-  function startProcess(cls, name) {
+  // Moonfill's button for this record: a visible one, else one that's on the page but out of sight (with
+  // the floating button, Moonfill's row is moved off screen, and the browser may count it as not visible).
+  function moonfillButton(cls) {
     const page = document.querySelector('.oneContent.active') || document;
-    const button = engine.all(page, `button.${cls}`).find(engine.dom.visible);
-    if (!button) { say(`Moonfill's ${name} button isn't on this record yet: wait for the record to finish loading.`); return; }
-    if (button.disabled) { say(`${name}: ${button.title || 'not available on this record'}.`); return; }
-    closeMenu();
-    button.click();
+    const buttons = engine.all(page, `button.${cls}`);
+    const id = (location.pathname.match(/\/lightning\/r\/TSE__c\/([a-zA-Z0-9]+)\/view/) || [])[1];
+    const forThisRecord = b => { const row = b.closest('#moonfillSalesforceSection'); return !row || !row.dataset.recordId || !id || row.dataset.recordId === id; };
+    return buttons.find(b => engine.dom.visible(b) && forThisRecord(b)) || buttons.find(b => b.isConnected && forThisRecord(b)) || null;
+  }
+  // Without Moonfill's button (its row waits for parts of the record Lightning may not have drawn), the
+  // setup and the Internal Review start by themselves: neither needs Moonfill for it. The scan does.
+  const DIRECT = {
+    'mf-impl': () => globalThis.TCASetupForm && (globalThis.TCASetupForm.open(), true),
+    'mf-ir': () => globalThis.OIRHook && globalThis.OIRHook.open()
+  };
+  function startProcess(cls, name) {
+    const button = moonfillButton(cls);
+    if (button && button.disabled) { say(`${name}: ${button.title || 'not available on this record'}.`); return; }
+    if (button) { closeMenu(); button.click(); return; }
+    if (DIRECT[cls] && DIRECT[cls]()) { closeMenu(); return; }
+    say(`Moonfill's ${name} button isn't on this record yet: wait for the record to finish loading, or reload the page.`);
   }
   $('.moon').addEventListener('click', () => startProcess('mf-moon', 'Moonpull scan'));
   $('.ir').addEventListener('click', () => startProcess('mf-ir', 'IR'));
